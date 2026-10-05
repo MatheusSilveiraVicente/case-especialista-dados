@@ -1,0 +1,18 @@
+pandas
+numpy
+pyarrow
+matplotlib
+seaborn
+scikit-learn
+lightgbm
+xgboost
+optuna
+shap
+statsmodels
+holidays
+pytest
+jupyter
+# Seção 2 (demo CLIP)
+pillow
+torch
+transformers

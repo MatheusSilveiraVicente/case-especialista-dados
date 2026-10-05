@@ -1,0 +1,30 @@
+{
+  "holdout": {
+    "candidato": "xgboost",
+    "empates": [
+      "media_movel_7"
+    ],
+    "vencedor": "media_movel_7"
+  },
+  "walkforward": {
+    "candidato": "lightgbm",
+    "empates": [
+      "naive_sazonal",
+      "media_movel_7",
+      "ridge"
+    ],
+    "vencedor": "naive_sazonal"
+  },
+  "walkforward_concorda": false,
+  "regra4_vencedor": "naive_sazonal",
+  "poder_estatistico": {
+    "holdout": {
+      "n_blocos_semanas": 5,
+      "semi_largura_media_ic95_diferenca_wape": 0.09194754707774407
+    },
+    "walkforward": {
+      "n_blocos_semanas": 11,
+      "semi_largura_media_ic95_diferenca_wape": 0.06598976108694955
+    }
+  }
+}

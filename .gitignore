@@ -1,0 +1,39 @@
+# Dados (nunca versionar dado bruto ou processado)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+data/banners_sinteticos/
+data/banners_reais/
+
+# Artefatos de modelo
+models/*
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Segredos e ambiente
+.env
+*.env
+
+# Bastidores do workflow com agentes (ficam locais)
+docs/tasks/
+docs/auditoria_*.md
+docs/PLAN.md
+docs/pitch_modelo.md
+
+# Índices derivados / locais
+graphify-out/
+.claude/settings.local.json
+
+# Configuração local de ferramentas
+AGENTS.md
+CLAUDE.md
+.claude/
+.codex/
