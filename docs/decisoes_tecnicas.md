@@ -35,7 +35,10 @@ Formato: contexto → decisão → consequência.
 - Consequência: árvores não extrapolam tendência, aceitável dado o nível plano; eventos únicos são aprendidos com 1 exemplo, então o erro em datas especiais é reportado à parte.
 - Resultado (WAPE da receita total; junho cego / walk-forward de avaliação): naive 35,1% / 30,9%; média móvel 31,2% / 22,8%; Ridge 22,8% / 25,3%; XGBoost 18,6% / 23,3%; LightGBM 20,1% / 22,3%. Bias de XGBoost e LightGBM em junho ≈ 0.
 - Veredito da regra pré-fixada: com 5 semanas de teste (block bootstrap), as árvores superam o Ridge com significância, mas não se separam estatisticamente da média móvel (IC da diferença encosta em zero), e XGBoost e LightGBM empatam. A regra, aplicada literalmente, aponta a média móvel; ela também se mostrou não transitiva no walk-forward, o que registramos como limite do critério.
-- Decisão de negócio: LightGBM em produção, com a média móvel como régua de monitoramento. Critério: em semanas comuns os modelos empatam; em semanas com evento, a média móvel quebra (Namorados: 54% × 19%; pós-Dia das Mães: 51% × 29%), e é nelas que a operação depende da previsão. Desempate com o XGBoost por engenharia (retreino ~2,5× mais rápido, categorias nativas). Gatilho de reversão: se o LightGBM não superar a média móvel nas próximas datas especiais, volta-se ao modelo simples.
+- Decisão de negócio: LightGBM, com a média móvel como régua de monitoramento. Critério: nas 16 semanas testadas, quando a venda muda de patamar de uma semana para outra (datas e ressacas), o LightGBM erra ~26% e a média móvel ~37%; em semanas estáveis, a média móvel erra menos (~14% × ~18%). Exemplos: semana do Dia dos Namorados (08–14/06), 43% × 26%; semana seguinte (15–21/06), 54% × 19%. O modelo também perde em algumas viradas (29/04–05/05, antes do Dia das Mães: 39% × 31%). A evidência é modesta (correlação de Spearman 0,44 entre a virada de nível e a vantagem do modelo, p = 0,09).
+- XGBoost × LightGBM: empate técnico (junho 18,6% × 20,1%, IC da diferença cruza zero; walk-forward 23,3% × 22,3%). Mantido o LightGBM, candidato definido antes do torneio, pelo critério de desempate registrado acima; trocar depois de ver junho seria escolher olhando o teste. Qualquer um dos dois atenderia.
+- Gatilho de reversão: se o LightGBM não superar a média móvel nas próximas semanas de virada (Dia dos Pais, Black Friday), volta-se ao modelo simples.
+- `decisao.json` registra a aplicação literal da regra: média móvel em junho e naive no walk-forward. O resultado reflete a falta de poder estatístico (5 e 11 semanas) e a não transitividade da regra (o naive perde para a média móvel com significância), não superioridade das réguas.
 
 ## D08 — Payday separado em dia 5 e dia 20
 - Contexto: o handoff definia payday como dias 5 e 20 (+2 dias). Na EDA (dez-jun, sem janelas de evento, controlando mês e dia da semana), os dias 5-7 vendem +22% acima do esperado e os dias 20-22 ficam neutros (Mann-Whitney p = 0,005 para o payday combinado).
@@ -50,6 +53,23 @@ Formato: contexto → decisão → consequência.
   3. Regra de decisão fixada antes da rodada final: menor WAPE no holdout; empate estatístico (IC pareado contém zero) favorece o modelo mais simples.
 - O que a auditoria mudou: variáveis de calendário que assumiam valores nunca vistos no treino (mês e semana do ano) foram removidas; feriados ausentes da biblioteca nacional (Carnaval, Corpus Christi) foram incluídos; todos os modelos de ML passaram a usar o mesmo alvo (log da receita); folds de ajuste e de avaliação passaram a ser disjuntos; intervalos de confiança passaram a reamostrar semanas inteiras.
 - Consequência: os números apresentados vêm exclusivamente da rodada final, com as correções aplicadas.
+
+## D10 — Métricas complementares e faixa de previsão
+- Contexto: WAPE diário sozinho não diz quanto o modelo agrega nem quão incerta é a previsão, e a operação planeja por semana.
+- Decisão: reportar ganho sobre a régua (FVA), erro semanal, erro por antecedência e uma faixa P10–P90. A faixa vem de LightGBM quantílico calibrado por conformal (folga em log estimada nas semanas de ajuste, cobertura medida nas semanas de avaliação e em junho).
+- Resultado (LightGBM): FVA em junho de 43% sobre repetir a semana anterior e 36% sobre a média móvel (no walk-forward, 28% e 2%); erro semanal de 11,8% em junho (≈ R$ 1,1 mi por semana) e 16,1% no walk-forward. A faixa quantílica sem ajuste cobria 63% (junho) e 47% (walk-forward) dos dias, abaixo dos 80% nominais; ajustada por conformal, cobre 90% e 93%: é conservadora, com largura próxima do valor previsto (≈ ±50%).
+- O erro por antecedência (1 a 7 dias) não é interpretado como efeito da antecedência: todas as variáveis usam a mesma defasagem de 7 dias, e a variação reflete dia da semana e datas de cada posição.
+- Consequência: a vantagem do modelo sobre a média móvel se concentra nas semanas de virada de nível; planejar pela semana reduz o erro de 20% para 12%; no dia isolado a incerteza é grande, e a faixa a torna explícita.
+
+## D11 — Leitura de comportamento de consumo
+- Contexto: o modelo diz quanto se vende; o negócio precisa entender como o consumidor reage a desconto e datas.
+- Decisão: regressões diárias controladas por dia da semana e mês (erros HAC) e comparações de mix por faixa de desconto e na janela pré-datas de presente (notebook 02).
+- Consequência: resultados apresentados como associações e hipóteses, não causalidade; a confirmação depende de margem, calendário de campanhas e dados de cliente.
+
+## D12 — Limitações de validação declaradas
+- Semanas de ajuste e de avaliação são intercaladas: os hiperparâmetros viram semanas posteriores a parte da avaliação; com autocorrelação entre semanas vizinhas, o walk-forward é levemente otimista. Junho, isolado, não tem esse problema.
+- Junho tem 5 blocos semanais (o último com 2 dias): poder estatístico baixo para separar modelos parecidos.
+- Calendário de eventos fixo no código (sem Dia dos Pais nem Black Friday 2026); em produção, precisaria ser versionado e mantido pelo negócio.
 
 ## D06 — Dado bruto fora do Git
 - Contexto: repositório será público; dado é da empresa.

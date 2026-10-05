@@ -239,6 +239,36 @@ def selecionar_previsao_ensemble(previsoes: pd.DataFrame) -> pd.DataFrame:
     return previsoes.loc[filtro].copy()
 
 
+def fva(wape_modelo: float, wape_regua: float) -> float:
+    """Ganho sobre a regua: fracao do erro da regua que o modelo elimina."""
+    return float(1 - wape_modelo / wape_regua) if wape_regua else np.nan
+
+
+def totais_semanais(total_diario: pd.DataFrame) -> pd.DataFrame:
+    """Soma real e previsto por semana prevista (coluna origem)."""
+    return total_diario.groupby("origem", as_index=False)[["y", "y_hat"]].sum()
+
+
+def rmse(y: object, y_hat: object) -> float:
+    """Raiz do erro quadratico medio (pune erros grandes)."""
+    real, previsto = _vetores(y, y_hat)
+    return float(np.sqrt(np.mean((real - previsto) ** 2)))
+
+
+def cobertura(y: object, inferior: object, superior: object) -> float:
+    """Fracao dos valores reais dentro do intervalo [inferior, superior]."""
+    real, baixo = _vetores(y, inferior)
+    _, alto = _vetores(y, superior)
+    return float(np.mean((real >= baixo) & (real <= alto)))
+
+
+def pinball(y: object, quantil_previsto: object, alpha: float) -> float:
+    """Perda quantilica media para o quantil alpha."""
+    real, previsto = _vetores(y, quantil_previsto)
+    erro = real - previsto
+    return float(np.mean(np.maximum(alpha * erro, (alpha - 1) * erro)))
+
+
 def wape_total_por_data(
     real: pd.Series, previsto: object, datas: pd.Series
 ) -> float:

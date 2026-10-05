@@ -3,11 +3,11 @@
 ## Resumo executivo
 
 - **Posição: eu não seguiria com o projeto como ele está.** A ideia é boa, mas está crua: não há KPI definido, nem critério do que é um banner "bom", nem decisão de negócio clara que o score vá apoiar. Construir o pipeline agora seria otimizar uma métrica que ninguém escolheu. O primeiro passo é entender o escopo; só depois uma PoC e, se ela provar valor, um MVP.
-- O problema não é a ferramenta, é a pergunta. Antes de escolher tecnologia, definimos qual decisão o score vai apoiar e qual KPI prova que funcionou (CTR e receita por sessão, não "beleza").
+- O problema não é a ferramenta, é a pergunta. Antes de escolher tecnologia, definimos qual decisão o score vai apoiar e qual KPI prova que funcionou: recomendamos **receita por impressão**, não CTR nem "beleza".
 - A ferramenta no-code não homologada é uma restrição de compliance, não um bloqueio. Seguimos em duas trilhas: MVP dentro do ambiente já homologado e, em paralelo, pedido formal de avaliação da ferramenta com Segurança da Informação e Jurídico.
-- Tecnicamente: embeddings de imagem (CLIP) transformam cada banner em uma "impressão digital numérica". Sobre ela classificamos atributos (zero-shot), agrupamos estilos visuais e treinamos um score que prevê clique, controlando posição, período e desconto.
-- MVP de 4 semanas com gate de go/no-go. O score só vale se ganhar um teste A/B.
-- Custo × retorno por ponto de equilíbrio: o MVP se paga se gerar receita incremental equivalente a uma fração pequena da receita mensal do e-commerce (seção 3.3).
+- Tecnicamente: embeddings de imagem (CLIP) transformam cada banner em uma "impressão digital numérica". Sobre ela classificamos atributos, agrupamos estilos visuais e treinamos um score de receita por impressão, controlando posição e semana.
+- Sequência de 7–8 semanas: escopo (1–2), PoC (2) e MVP (4), com critério de parada em cada etapa. O score só vale se ganhar um teste A/B.
+- Custo × retorno sobre **margem**, com custo recorrente e três cenários: no cenário base o projeto se paga em cerca de um ano; no pessimista, a perda fica limitada ao custo do MVP porque os critérios de parada interrompem o investimento (seção 3.3).
 
 ---
 
@@ -44,7 +44,23 @@ Caminho proposto, em paralelo:
 2. **Trilha homologação:** se a ferramenta no-code for essencial para a autonomia do time, abrir o processo formal de avaliação de fornecedor com Segurança da Informação e Jurídico, com o MVP servindo de caso de uso.
 3. **Sandbox:** enquanto não há aprovação, testes só com banners já publicados (públicos), sem dados de cliente.
 
-### 1.4 Um time sem programação continua dono do problema
+### 1.4 Roteiro da primeira conversa com o time
+
+1. **Reconhecer a iniciativa:** a ideia nasceu de quem conhece os banners por dentro; é exatamente o tipo de inovação que queremos.
+2. **Separar problema de ferramenta:** "a ferramenta não está homologada; o problema que vocês acharam continua de pé, e vamos resolvê-lo".
+3. **Fazer as perguntas de escopo** (seção 1.1) juntos, saindo com a decisão que o score apoia e o KPI.
+4. **Combinar o que começa já, sem esperar a homologação:** rotular uma amostra de banners (o que é "bom" para vocês?), levantar o histórico de performance com o time de web analytics, e explorar o que dá para fazer nas ferramentas já homologadas (planilhas e painéis corporativos).
+5. **Definir papéis e prazos:**
+
+| Quem | Responsável por |
+|---|---|
+| Time do hackathon | Dono do problema: KPI, rótulos, hipóteses, acompanhamento do A/B |
+| Time de dados | Pipeline, embeddings, modelo, validação |
+| Segurança da Informação | Parecer sobre a ferramenta no-code (prazo combinado na abertura do processo) |
+| Jurídico | Direito de imagem e uso de material de campanha |
+| Sponsor de negócio | Aprovar o A/B e o espaço de teste |
+
+### 1.5 Um time sem programação continua dono do problema
 
 | Time do hackathon | Time de dados |
 |---|---|
@@ -55,7 +71,7 @@ Caminho proposto, em paralelo:
 
 O entusiasmo do hackathon é ativo da cultura de inovação. A mensagem para o time é "vamos chegar lá por um caminho seguro", não "não pode".
 
-### 1.5 Que score? Cenários possíveis
+### 1.6 Que score? Cenários possíveis
 
 "Score de banner" pode significar coisas muito diferentes. Cada cenário apoia uma decisão distinta e exige dados distintos. Escolher um é a principal saída do entendimento de escopo.
 
@@ -72,7 +88,7 @@ O entusiasmo do hackathon é ativo da cultura de inovação. A mensagem para o t
 
 Recomendação inicial: **receita por impressão** como KPI de negócio, com CTR e conversão como diagnósticos. Os três qualitativos/técnicos (marca, acessibilidade, fadiga) entram como checagens, não como score principal.
 
-### 1.6 Provocações para a discussão (hipóteses, sem dado ainda)
+### 1.7 Provocações para a discussão (hipóteses, sem dado ainda)
 
 Sem dados de banners, o valor está em fazer as perguntas certas. Algumas, ligadas ao que vimos na Seção 1:
 
@@ -100,7 +116,7 @@ flowchart LR
     C --> F[Base de features]
     Q --> F
     Z --> F
-    F --> S[Score de CTR<br/>regressão logística / LightGBM<br/>controlando posição, período, desconto]
+    F --> S[Score de receita por impressão<br/>regressão regularizada / LightGBM<br/>controlando posição e semana]
     S --> D[Dashboard semanal +<br/>checagem pré-publicação]
     S --> T[Teste A/B<br/>valida causalidade]
     D --> M[Monitoramento<br/>drift e retreino]
@@ -114,10 +130,10 @@ flowchart LR
 | Atributos quantitativos | OpenCV + OCR | Brilho, contraste, cor dominante, proporção de texto, preço visível. Explicáveis para o time de criação. |
 | Atributos qualitativos | Zero-shot CLIP com rótulos definidos pelo time | "Produto em destaque", "pessoa", "fundo claro", "preço/desconto", "lançamento". |
 | Estilos visuais | K-means sobre embeddings | Revela famílias de banner e permite comparar performance por família. |
-| Score | Regressão logística (MVP) → LightGBM | Prever CTR a partir de embeddings + atributos + contexto. Começar simples. |
+| Score | Regressão regularizada (MVP) → LightGBM | Prever receita por impressão a partir de embeddings + atributos + contexto. Começar simples. |
 | Busca por similaridade | FAISS (fase de escala) | "Mostre banners parecidos com este que performaram bem." |
 | Serviço | Batch semanal (MVP) → API (escala) | O MVP não precisa de tempo real. |
-| Monitoramento | Drift dos embeddings e do CTR | Nova identidade visual ou sazonalidade mudam o padrão. |
+| Monitoramento | Drift dos embeddings e da receita por impressão | Nova identidade visual ou sazonalidade mudam o padrão. |
 
 Opção complementar: um LLM multimodal (via provedor homologado) pode gerar uma crítica em linguagem natural de cada banner frente ao guideline de marca. Útil para o lado qualitativo e para o time sem programação; custo por imagem e consistência precisam ser avaliados.
 
@@ -140,9 +156,24 @@ O que isso ensina para o MVP:
 2. **Zero-shot depende de fazer a pergunta certa.** Prompts em inglês não casaram com "50% OFF" e "NOVO" em português. Com só 24 exemplos rotulados, um classificador simples acerta 100%. Rotular uma amostra pequena é exatamente o papel do time do hackathon.
 3. **Detalhes pequenos não aparecem no embedding global** (preço, frasco). Por isso a arquitetura combina embeddings com OCR e atributos quantitativos.
 
+Por que 19% e 25%, abaixo do acaso? Quando não há sinal, a validação cruzada com poucos exemplos tende a ficar abaixo de 50%: ao separar exemplos de uma classe para teste, o treino fica levemente enviesado para a outra. Leia como "atributo não detectado". E, para zero-shot com texto em português, a escolha natural é um CLIP multilíngue (ou SigLIP multilíngue), em vez do CLIP original treinado com legendas em inglês.
+
 Limite: banners sintéticos são mais simples que os reais, e a demo não mede performance comercial (não há dado de clique). Ela valida componentes, não o score.
 
-### 2.4 O ponto técnico que mais importa: causalidade
+### 2.4 Como o embedding vira nota
+
+| Peça | Especificação do MVP |
+|---|---|
+| Unidade | Um banner exibido em um espaço (posição) numa semana |
+| Alvo | Receita atribuída ÷ impressões (receita por impressão), em log |
+| Variáveis da imagem | Componentes principais do embedding (≈ 20–50), atributos de OCR (preço visível, % de texto) e atributos quantitativos (cor, contraste) |
+| Controles | Efeitos fixos de posição e de semana, desconto da campanha e canal: o score compara banners dentro do mesmo espaço e período |
+| Modelo | Regressão regularizada no MVP (explicável); LightGBM se houver volume |
+| Validação | Temporal: treinar em campanhas passadas e medir, nas semanas seguintes, se o ranking do score acerta a ordem de receita por impressão dos banners de cada espaço (correlação de ranking) |
+| Saída | Nota relativa (percentil dentro do espaço) e os atributos que mais pesaram, para o time de criação |
+| Infraestrutura | Vetores guardados num índice vetorial (FAISS) junto ao catálogo do DAM; ~38 ms por banner em CPU, custo de cálculo desprezível |
+
+### 2.5 O ponto técnico que mais importa: causalidade
 
 Um banner na primeira posição da home durante a Black Friday tem CTR alto por causa da posição e do momento, não da imagem. Se o modelo não controlar isso, ele aprende "banner de Black Friday é bom". Por isso:
 - posição, período, campanha e desconto entram como variáveis de controle;
@@ -158,35 +189,37 @@ Um banner na primeira posição da home durante a Black Friday tem CTR alto por 
 |---|---|
 | Embedding | Uma impressão digital numérica da imagem: banners parecidos têm impressões parecidas. |
 | Zero-shot | O modelo reconhece "tem uma pessoa" ou "tem preço" sem precisar de exemplos rotulados. |
-| Score | A chance de clique esperada para este banner, comparada a banners parecidos na mesma posição. |
-| Teste A/B | Metade do público vê o banner A, metade vê o B; a diferença de clique é a prova. |
+| Score | A receita esperada por impressão deste banner, comparada a banners no mesmo espaço e período. |
+| Teste A/B | Metade do público vê o banner A, metade vê o B; a diferença medida é a prova. |
 
-### 3.2 MVP de 4 semanas
+### 3.2 MVP de 4 semanas (depois de escopo e PoC: 7–8 semanas no total)
 
-| Semana | Entrega | Gate |
+| Semana do MVP | Entrega | Segue se… |
 |---|---|---|
-| 1 | Discovery, KPI definido, base de banners históricos + métricas de clique | Existem dados de performance suficientes? (ex.: 200+ banners com impressões) |
-| 2 | Embeddings, atributos, clusters, zero-shot | Os clusters fazem sentido para o time de criação? |
-| 3 | Score de CTR com validação temporal | O score bate a régua (CTR médio da posição)? |
-| 4 | Desenho e início do A/B | Go/no-go para escala depende do A/B |
+| 1 | Base de banners históricos com impressões, cliques e receita atribuída, por espaço e semana | Há dado suficiente (ex.: 200+ banners com impressões) |
+| 2 | Embeddings, atributos, clusters | Os grupos fazem sentido para o time de criação |
+| 3 | Score de receita por impressão com validação temporal | O ranking do score bate a régua (média histórica do espaço) |
+| 4 | Desenho e início do A/B | O A/B decide a escala |
 
 Equipe: 1 cientista de dados dedicado, apoio parcial de engenharia de dados e o time do hackathon como dono do negócio. Infraestrutura: nuvem homologada existente; CLIP roda em CPU nesse volume, então custo de GPU é marginal.
 
-### 3.3 Custo × retorno: ponto de equilíbrio
+### 3.3 Custo × retorno
 
-Em vez de prometer um uplift, mostramos quanto o MVP precisa entregar para se pagar.
+Todos os valores de custo, margem e ganho abaixo são **premissas ilustrativas** a substituir pelos números de Finanças. A receita mensal vem da base do case (R$ 490 mi em 8 meses ≈ R$ 61 mi/mês) e pode ser só parte do total real.
 
-- Receita do e-commerce na base do case: R$ 490 mi em 8 meses ≈ R$ 61 mi/mês.
-- Custo do MVP: C (pessoas + infraestrutura por 4 semanas; valor a preencher com o custo real do time).
-- Ponto de equilíbrio no primeiro mês após o go: receita incremental ≥ C.
+**Premissas:** custo do escopo + PoC + MVP = R$ 100 mil (uma vez); custo recorrente de operação = R$ 10 mil/mês; margem de contribuição = 30% da receita incremental.
 
-| Custo do MVP (C) | Receita incremental necessária em 1 mês | % da receita mensal |
-|---|---|---|
-| R$ 50 mil | R$ 50 mil | 0,08% |
-| R$ 100 mil | R$ 100 mil | 0,16% |
-| R$ 200 mil | R$ 200 mil | 0,33% |
+| Cenário | Ganho de receita (% da receita mensal) | Margem incremental/mês | Menos o custo recorrente | Payback |
+|---|---|---|---|---|
+| Pessimista | 0% (o A/B não mostra efeito) | R$ 0 | −R$ 10 mil | Não se paga: o projeto para no critério de parada, e a perda fica limitada ao custo do MVP |
+| Base | 0,1% (≈ R$ 61 mil) | ≈ R$ 18 mil | ≈ R$ 8 mil | ≈ 12 meses |
+| Otimista | 0,3% (≈ R$ 183 mil) | ≈ R$ 55 mil | ≈ R$ 45 mil | ≈ 2 meses |
 
-Leitura: se o melhor banner na home influenciar mesmo uma fração pequena das vendas, a conta fecha rápido. O A/B mede exatamente essa fração. Os valores de C são ilustrativos; a receita vem do dado do case e pode ser uma amostra do total real.
+**O A/B não consegue medir 0,1% da receita total.** Por isso o teste usa um **KPI intermediário detectável**, com a receita por impressão como guarda (não pode piorar):
+- Exemplo: CTR base de 2% no espaço testado; para detectar +5% relativo (2,0% → 2,1%) com 80% de poder e 5% de significância, são precisos ~310 mil impressões por variante. Em um espaço de home com tráfego alto, isso leva dias, não meses.
+- O ganho financeiro se confirma depois, acompanhando a receita por impressão do espaço por algumas semanas.
+
+**Custo de não fazer:** decisões de criativo continuam sem dado; o time do hackathon, desmotivado, tende a buscar ferramentas paralelas sem governança, exatamente o risco que a homologação quer evitar.
 
 Retornos não financeiros: briefing de criação baseado em dado, menos tempo de revisão manual, e a mesma infraestrutura de embeddings reaproveitável para busca no DAM, detecção de duplicados e checagem de guideline de marca.
 
@@ -210,4 +243,4 @@ Entendimento de escopo (1-2 semanas, KPI e dados) → PoC (2 semanas, banners hi
 1. Acesso aos dados de performance de banners (impressões, cliques, posição).
 2. Um sponsor de negócio para o A/B.
 3. Aval para a trilha de homologação com Segurança da Informação e Jurídico.
-4. Quatro semanas de um cientista de dados.
+4. Sete a oito semanas de um cientista de dados (escopo, PoC e MVP), com critério de parada em cada etapa.

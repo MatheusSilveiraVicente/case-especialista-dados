@@ -1,6 +1,6 @@
 modelo,segundos
-naive_sazonal,0.01945500
-media_movel_7,0.02836700
-ridge,0.12335530
-xgboost,9.41667010
-lightgbm,3.78363970
+naive_sazonal,0.03279460
+media_movel_7,0.05415390
+ridge,0.20992660
+xgboost,15.27094690
+lightgbm,6.36974250

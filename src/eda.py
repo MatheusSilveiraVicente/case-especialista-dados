@@ -69,7 +69,7 @@ def fig_serie_diaria(g):
     _mi(ax)
     ax.set_ylim(0, d["receita"].max() * 1.15)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b/%y"))
-    ax.set_title("Receita diária: novembro é outro negócio; o resto do ano é plano com picos de data")
+    ax.set_title("Receita diária: novembro é outro negócio; depois, sem tendência e com picos de data")
     ax.legend(loc="upper right")
     return _salvar(fig, "eda_01_serie_diaria.png")
 
