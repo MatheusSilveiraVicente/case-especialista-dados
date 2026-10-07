@@ -70,3 +70,10 @@ def test_conformal_alarga_ate_a_cobertura_alvo() -> None:
 
     assert folga >= 0
     assert cobertura(calibrado["y"], calibrado["p10"], calibrado["p90"]) >= 0.8
+
+
+def test_cobertura_faixa_semanal_calculada_a_mao() -> None:
+    from src.intervalos import cobertura_faixa_semanal
+
+    semanas = pd.DataFrame({"y": [80.0, 100.0, 130.0], "y_hat": [100.0] * 3})
+    assert cobertura_faixa_semanal(semanas, -0.2, 0.2) == pytest.approx(2 / 3)

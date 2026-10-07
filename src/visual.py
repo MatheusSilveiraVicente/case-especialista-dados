@@ -53,7 +53,7 @@ def _walkforward_gif(features: pd.DataFrame, previsoes: pd.DataFrame) -> None:
         erro = wape_total_por_data(
             acumulado["y"], acumulado["y_hat"], acumulado["data"]
         )
-        ax.set_title(f"Walk-forward — origem {origem:%d/%m/%Y} — WAPE acumulado {erro:.1%}")
+        ax.set_title(f"Walk-forward — origem {origem:%d/%m/%Y} — WAPE das semanas previstas {erro:.1%}")
         ax.set_xlabel("Data")
         ax.set_ylabel("Receita total (R$ mi)")
         ax.legend(loc="upper right", ncol=2)

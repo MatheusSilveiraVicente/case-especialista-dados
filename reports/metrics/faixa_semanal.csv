@@ -1,0 +1,6 @@
+recorte,modelo_referencia,n_blocos,n_semanas_cheias,quantil_10_erro_relativo,quantil_90_erro_relativo,cobertura,p80_erro_absoluto_semanal
+ajuste,lightgbm_seed_42,11,11,-0.353448,0.361958,0.818182,0.358316
+walkforward_avaliacao,lightgbm_seed_42,11,10,-0.353448,0.361958,0.909091,0.228141
+junho,lightgbm_seed_42,5,4,-0.353448,0.361958,0.800000,0.114477
+dezesseis_semanas,lightgbm_seed_42,16,14,-0.353448,0.361958,0.875000,0.214557
+vinte_cinco_semanas,lightgbm_seed_42,27,25,-0.353448,0.361958,0.851852,0.286924

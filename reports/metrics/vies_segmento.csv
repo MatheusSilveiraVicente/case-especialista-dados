@@ -1,0 +1,49 @@
+modelo,conjunto,segmento,vies
+naive_sazonal,walkforward_avaliacao,evento/janela de evento,-0.27818545
+naive_sazonal,walkforward_avaliacao,dia normal,0.02835492
+media_movel_7,walkforward_avaliacao,evento/janela de evento,-0.29379066
+media_movel_7,walkforward_avaliacao,dia normal,0.01601371
+ets_log,walkforward_avaliacao,evento/janela de evento,-0.19792031
+ets_log,walkforward_avaliacao,dia normal,-0.13363960
+sarima_log,walkforward_avaliacao,evento/janela de evento,-0.24134345
+sarima_log,walkforward_avaliacao,dia normal,-0.07878203
+sarimax_log,walkforward_avaliacao,evento/janela de evento,-0.29284659
+sarimax_log,walkforward_avaliacao,dia normal,-0.05296746
+ridge,walkforward_avaliacao,evento/janela de evento,-0.37834336
+ridge,walkforward_avaliacao,dia normal,-0.08036787
+xgboost,walkforward_avaliacao,evento/janela de evento,-0.25454787
+xgboost,walkforward_avaliacao,dia normal,0.00639613
+lightgbm,walkforward_avaliacao,evento/janela de evento,-0.26148979
+lightgbm,walkforward_avaliacao,dia normal,0.01045715
+naive_sazonal,junho,evento/janela de evento,-0.34391796
+naive_sazonal,junho,dia normal,0.16824313
+media_movel_7,junho,evento/janela de evento,-0.32636083
+media_movel_7,junho,dia normal,0.15496442
+ets_log,junho,evento/janela de evento,-0.15824678
+ets_log,junho,dia normal,-0.07152278
+sarima_log,junho,evento/janela de evento,-0.21456842
+sarima_log,junho,dia normal,0.05440710
+sarimax_log,junho,evento/janela de evento,-0.13161864
+sarimax_log,junho,dia normal,0.07300953
+ridge,junho,evento/janela de evento,-0.21361976
+ridge,junho,dia normal,0.08651401
+xgboost,junho,evento/janela de evento,-0.16398831
+xgboost,junho,dia normal,0.08705940
+lightgbm,junho,evento/janela de evento,-0.15528609
+lightgbm,junho,dia normal,0.08390195
+naive_sazonal,dezesseis_semanas,evento/janela de evento,-0.30944592
+naive_sazonal,dezesseis_semanas,dia normal,0.05899014
+media_movel_7,dezesseis_semanas,evento/janela de evento,-0.30928009
+media_movel_7,dezesseis_semanas,dia normal,0.04644361
+ets_log,dezesseis_semanas,evento/janela de evento,-0.17905273
+ets_log,dezesseis_semanas,dia normal,-0.12003615
+sarima_log,dezesseis_semanas,evento/janela de evento,-0.22861002
+sarima_log,dezesseis_semanas,dia normal,-0.04961389
+sarimax_log,dezesseis_semanas,evento/janela de evento,-0.21617126
+sarimax_log,dezesseis_semanas,dia normal,-0.02537877
+ridge,dezesseis_semanas,evento/janela de evento,-0.30000559
+ridge,dezesseis_semanas,dia normal,-0.04382110
+xgboost,dezesseis_semanas,evento/janela de evento,-0.21148037
+xgboost,dezesseis_semanas,dia normal,0.02406121
+lightgbm,dezesseis_semanas,evento/janela de evento,-0.21098239
+lightgbm,dezesseis_semanas,dia normal,0.02654140

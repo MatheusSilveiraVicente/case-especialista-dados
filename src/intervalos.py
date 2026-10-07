@@ -39,6 +39,101 @@ def _carregar_previsoes() -> dict[str, pd.DataFrame]:
     return conjuntos
 
 
+def _semanas_lightgbm(previsoes: pd.DataFrame) -> pd.DataFrame:
+    selecionadas = previsoes.loc[
+        previsoes["modelo"].eq("lightgbm") & previsoes["seed"].eq(42)
+    ]
+    total = agregar_total(selecionadas)
+    return total.groupby("origem", as_index=False).agg(
+        inicio=("data", "min"),
+        fim=("data", "max"),
+        y=("y", "sum"),
+        y_hat=("y_hat", "sum"),
+        n_dias=("data", "nunique"),
+    )
+
+
+def calibrar_faixa_semanal(previsoes_tuning: pd.DataFrame) -> tuple[float, float]:
+    """Calcula P10-P90 do erro relativo nas semanas completas de ajuste."""
+    semanas = _semanas_lightgbm(previsoes_tuning)
+    semanas = semanas.loc[semanas["n_dias"].eq(7)]
+    erro_relativo = semanas["y"].div(semanas["y_hat"]).sub(1)
+    baixo, alto = np.quantile(erro_relativo, [0.1, 0.9])
+    return float(baixo), float(alto)
+
+
+def cobertura_faixa_semanal(
+    semanas: pd.DataFrame, quantil_baixo: float, quantil_alto: float
+) -> float:
+    """Mede cobertura de uma faixa multiplicativa em totais semanais."""
+    inferior = semanas["y_hat"] * (1 + quantil_baixo)
+    superior = semanas["y_hat"] * (1 + quantil_alto)
+    return cobertura(semanas["y"], inferior, superior)
+
+
+def resumir_faixa_semanal(
+    tuning: pd.DataFrame, walkforward: pd.DataFrame, holdout: pd.DataFrame
+) -> pd.DataFrame:
+    """Resume calibracao, cobertura e P80 do erro semanal."""
+    baixo, alto = calibrar_faixa_semanal(tuning)
+    conjuntos = {
+        "ajuste": _semanas_lightgbm(tuning),
+        "walkforward_avaliacao": _semanas_lightgbm(walkforward),
+        "junho": _semanas_lightgbm(holdout),
+    }
+    conjuntos["dezesseis_semanas"] = pd.concat(
+        [conjuntos["walkforward_avaliacao"], conjuntos["junho"]],
+        ignore_index=True,
+    )
+    todas = pd.concat(
+        [conjuntos["ajuste"], conjuntos["dezesseis_semanas"]], ignore_index=True
+    )
+    linhas = []
+    for recorte, semanas in [*conjuntos.items(), ("vinte_cinco_semanas", todas)]:
+        cheias = semanas.loc[semanas["n_dias"].eq(7)]
+        erro_abs = cheias["y"].div(cheias["y_hat"]).sub(1).abs()
+        linhas.append(
+            {
+                "recorte": recorte,
+                "modelo_referencia": "lightgbm_seed_42",
+                "n_blocos": len(semanas),
+                "n_semanas_cheias": len(cheias),
+                "quantil_10_erro_relativo": baixo,
+                "quantil_90_erro_relativo": alto,
+                "cobertura": cobertura_faixa_semanal(semanas, baixo, alto),
+                "p80_erro_absoluto_semanal": float(np.quantile(erro_abs, 0.8)),
+            }
+        )
+    return pd.DataFrame(linhas)
+
+
+def figura_faixa_semanal_holdout(
+    tuning: pd.DataFrame, holdout: pd.DataFrame
+) -> Path:
+    """Mostra totais dos blocos de junho com a faixa calibrada."""
+    baixo, alto = calibrar_faixa_semanal(tuning)
+    semanas = _semanas_lightgbm(holdout)
+    x = np.arange(len(semanas))
+    inferior = semanas["y_hat"] * (1 + baixo) / 1e6
+    superior = semanas["y_hat"] * (1 + alto) / 1e6
+    fig, ax = plt.subplots(figsize=(10, 4.8))
+    ax.fill_between(x, inferior, superior, color="#2F5D8A", alpha=0.2, label="Faixa semanal P10-P90")
+    ax.plot(x, semanas["y_hat"] / 1e6, color="#2F5D8A", marker="o", lw=2, label="Previsto")
+    ax.plot(x, semanas["y"] / 1e6, color="#1E2A2F", marker="o", lw=2.5, label="Real")
+    rotulos = [
+        f"{inicio:%d/%m}-{fim:%d/%m}" for inicio, fim in zip(semanas["inicio"], semanas["fim"])
+    ]
+    ax.set_xticks(x, rotulos)
+    ax.set_ylabel("Receita total (R$ mi)")
+    ax.set_title("Junho/2026: total semanal real x previsto com faixa empírica (seed 42)")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    caminho = PASTA_FIGURAS / "faixa_semanal_holdout.png"
+    fig.savefig(caminho, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return caminho
+
+
 def metricas_extras(conjuntos: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """FVA, erro semanal, RMSE e pior dia, na receita total diaria."""
     linhas = []
@@ -201,7 +296,7 @@ def figura_intervalo(total: pd.DataFrame, ponto_total: pd.DataFrame) -> Path:
     ax.plot(total["data"], total["y_hat"] / 1e6, color="#2F5D8A", lw=2, label="Previsão LightGBM")
     ax.plot(total["data"], total["y"] / 1e6, color="#1E2A2F", lw=2.5, label="Receita real")
     ax.set_ylabel("Receita total (R$ mi)")
-    ax.set_title("Junho/2026: previsão com faixa calibrada para 80%")
+    ax.set_title("Junho/2026: previsão com faixa ajustada (cobertura observada de 90%)")
     ax.grid(alpha=0.25)
     ax.spines[["top", "right"]].set_visible(False)
     ax.legend(loc="upper right")
@@ -221,6 +316,21 @@ def main() -> None:
     erro_por_semana(conjuntos, receita_diaria).to_csv(PASTA_METRICAS / "erro_por_semana.csv", index=False, float_format="%.6f")
 
     features = build_features(load_daily(by=["canal"]))
+    previsoes_cruas = {
+        nome: pd.read_parquet(PASTA_DADOS / f"predicoes_{nome}.parquet")
+        for nome in ["tuning", "walkforward", "holdout"]
+    }
+    faixa_semanal = resumir_faixa_semanal(
+        previsoes_cruas["tuning"],
+        previsoes_cruas["walkforward"],
+        previsoes_cruas["holdout"],
+    )
+    faixa_semanal.to_csv(
+        PASTA_METRICAS / "faixa_semanal.csv", index=False, float_format="%.6f"
+    )
+    figura_faixa_semanal_holdout(
+        previsoes_cruas["tuning"], previsoes_cruas["holdout"]
+    )
     parametros = json.loads((PASTA_METRICAS / "melhores_hiperparametros.json").read_text(encoding="utf-8"))["lightgbm"]
     folga = ajuste_conformal(prever_quantis(features, origens_tuning(), parametros))
     linhas = []

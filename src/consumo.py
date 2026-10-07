@@ -10,7 +10,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
+from scipy.stats import mannwhitneyu
 
+from src.calendario import EVENTOS
 from src.data_loader import CATEGORIA_NAO_MAPEADA, clean, complete_grid, load_raw, to_daily
 
 FIG_DIR = Path("reports/figures")
@@ -170,15 +172,78 @@ def fig_presente(curva: pd.DataFrame) -> Path:
     return _salvar(fig, "consumo_03_presente.png")
 
 
-def salario_por_canal(g: pd.DataFrame) -> pd.DataFrame:
-    """Indice da receita nos dias 5-7 vs demais, controlando mes e dia da semana, sem novembro."""
-    d = to_daily(g, by=["canal"])
-    d = d[d["data"].dt.month != 11].copy()
-    d["mes"] = d["data"].dt.to_period("M")
-    d["dia_semana"] = d["data"].dt.dayofweek
-    d["indice"] = d["receita"] / d.groupby(["canal", "mes", "dia_semana"])["receita"].transform("mean")
-    d["dias_5_a_7"] = d["data"].dt.day.isin([5, 6, 7])
-    return d.groupby(["canal", "dias_5_a_7"])["indice"].mean().unstack()
+def efeito_salario(g: pd.DataFrame) -> pd.DataFrame:
+    """Compara dias 5-7 na mesma base para total, App e Site."""
+    eventos = pd.to_datetime([*EVENTOS, "2025-12-25"])
+    linhas = []
+    for segmento in ["Total", "App", "Site"]:
+        d = to_daily(g) if segmento == "Total" else to_daily(g, by=["canal"])
+        if segmento != "Total":
+            d = d.loc[d["canal"].eq(segmento)]
+        d = d.loc[d["data"].dt.month.ne(11)].copy()
+        perto_evento = d["data"].map(
+            lambda data: (abs((eventos - data).days) <= 3).any()
+        )
+        d = d.loc[~perto_evento]
+        d["mes"] = d["data"].dt.to_period("M")
+        d["dia_semana"] = d["data"].dt.dayofweek
+        d["indice"] = d["receita"].div(
+            d.groupby(["mes", "dia_semana"])["receita"].transform("mean")
+        )
+        d["dias_5_a_7"] = d["data"].dt.day.isin([5, 6, 7])
+        salario = d.loc[d["dias_5_a_7"], "indice"]
+        demais = d.loc[~d["dias_5_a_7"], "indice"]
+        linhas.append(
+            {
+                "segmento": segmento,
+                "efeito_pct": (salario.mean() - 1) * 100,
+                "indice_dias_5_a_7": salario.mean(),
+                "indice_demais": demais.mean(),
+                "p_valor_mann_whitney": mannwhitneyu(salario, demais).pvalue,
+                "n_dias_5_a_7": len(salario),
+                "n_dias_demais": len(demais),
+            }
+        )
+    return pd.DataFrame(linhas)
+
+
+def lift_presente_reais(g: pd.DataFrame) -> pd.DataFrame:
+    """Compara as janelas de presente com dias equivalentes de jan-abr."""
+    legiveis = g.loc[g["categoria"].ne(CATEGORIA_NAO_MAPEADA)]
+    diario = to_daily(legiveis, by=["categoria"])
+    eventos = pd.to_datetime(list(EVENTOS))
+    base = diario.loc[diario["data"].between("2026-01-01", "2026-04-30")].copy()
+    base = base.loc[
+        ~base["data"].map(lambda data: (abs((eventos - data).days) <= 3).any())
+    ]
+    base["dia_semana"] = base["data"].dt.dayofweek
+    media_base = base.groupby(["categoria", "dia_semana"])["receita"].mean()
+    casos = [
+        ("Dia dos Namorados", "PERFUMARIA MASCULINA", "2026-06-06", "2026-06-12"),
+        ("Dia das Mães", "PERFUMARIA FEMININA", "2026-05-03", "2026-05-09"),
+        ("Dia das Mães", "GIFTS", "2026-05-03", "2026-05-09"),
+    ]
+    linhas = []
+    for evento, categoria, inicio, fim in casos:
+        datas = pd.date_range(inicio, fim)
+        observado = diario.loc[
+            diario["categoria"].eq(categoria) & diario["data"].between(inicio, fim),
+            "receita",
+        ].sum()
+        esperado = sum(media_base.loc[(categoria, data.dayofweek)] for data in datas)
+        linhas.append(
+            {
+                "evento": evento,
+                "categoria": categoria,
+                "inicio": inicio,
+                "fim": fim,
+                "receita_janela_rs": observado,
+                "receita_base_equivalente_rs": esperado,
+                "lift_rs": observado - esperado,
+                "lift_pct": observado / esperado - 1,
+            }
+        )
+    return pd.DataFrame(linhas)
 
 
 def gerar_todas(path="data/raw/vendas.csv") -> dict:
@@ -190,7 +255,8 @@ def gerar_todas(path="data/raw/vendas.csv") -> dict:
         "categorias": desconto_por_categoria(g),
         "preco_item": preco_por_item_mensal(g),
         "presente": curva_presente(g),
-        "salario": salario_por_canal(g),
+        "salario": efeito_salario(g),
+        "presente_lift": lift_presente_reais(g),
     }
     fig_sensibilidade(resultados["sensibilidade"])
     fig_mix(resultados["mix"])

@@ -7,7 +7,7 @@
 - A ferramenta no-code não homologada é uma restrição de compliance, não um bloqueio. Seguimos em duas trilhas: MVP dentro do ambiente já homologado e, em paralelo, pedido formal de avaliação da ferramenta com Segurança da Informação e Jurídico.
 - Tecnicamente: embeddings de imagem (CLIP) transformam cada banner em uma "impressão digital numérica". Sobre ela classificamos atributos, agrupamos estilos visuais e treinamos um score de receita por impressão, controlando posição e semana.
 - Sequência de 7–8 semanas: escopo (1–2), PoC (2) e MVP (4), com critério de parada em cada etapa. O score só vale se ganhar um teste A/B.
-- Custo × retorno sobre **margem**, com custo recorrente e três cenários: no cenário base o projeto se paga em cerca de um ano; no pessimista, a perda fica limitada ao custo do MVP porque os critérios de parada interrompem o investimento (seção 3.3).
+- Custo × retorno sobre **margem**: o ponto de equilíbrio explicita quanto o score precisa mover a receita influenciada pelos banners. Com as premissas ilustrativas, 0,10% da receita total paga o investimento em cerca de 12 meses; os gates limitam a perda a R$ 100 mil (seção 3.3).
 
 ---
 
@@ -93,8 +93,8 @@ Recomendação inicial: **receita por impressão** como KPI de negócio, com CTR
 Sem dados de banners, o valor está em fazer as perguntas certas. Algumas, ligadas ao que vimos na Seção 1:
 
 1. **CTR alto pode vender pior.** Na base de vendas, novembro teve desconto médio de 55% e ticket de R$ 59; junho, desconto de 35% e ticket de R$ 93. Um score de CTR tende a premiar banners de desconto agressivo, que atraem clique mas, pelo padrão observado, trazem pedidos menores. Por isso receita por impressão, e não CTR.
-2. **O App é 76% da receita.** Banner pensado para desktop pode ser o menos visto. O score deveria ser por canal e formato, não um só.
-3. **O horário muda o público.** O Site vende mais pela manhã e o App é mais noturno. O mesmo banner pode performar diferente conforme o horário em que é exibido; rotação por horário é um teste barato.
+2. **O App representa 76% da receita no período; 79% em junho.** Banner pensado para desktop pode ser o menos visto. O score deveria ser por canal e formato, não um só.
+3. **O horário muda o público.** Os dois canais têm pico às 11h; o App tem um segundo pico às 20–21h. O mesmo banner pode performar diferente conforme o horário em que é exibido; rotação por horário é um teste barato.
 4. **O "banner bonito" pode ser só o banner bem posicionado.** Sem controlar posição e período, o score aprende o calendário promocional, não a imagem.
 5. **Datas especiais se comportam como outro negócio.** Dia das Mães teve pico na véspera (sábado), não no domingo. A troca de banner precisa acompanhar a curva de compra, não a data comemorativa.
 6. **Pessoa no banner vende mais?** Hipótese clássica, mas com risco de viés: se o histórico favoreceu um perfil de modelo, o score reproduz. Testar com A/B e auditar por atributo.
@@ -126,37 +126,39 @@ flowchart LR
 
 | Etapa | Escolha | Por quê |
 |---|---|---|
-| Embeddings | CLIP (open-source; ex.: ViT-B/32) | Coloca imagem e texto no mesmo espaço: permite perguntar "este banner mostra uma promoção?" sem treinar nada (zero-shot). Roda em CPU para centenas de imagens. |
+| Embeddings | CLIP (aberto; ViT-B/32) | Régua de custo zero que coloca imagem e texto no mesmo espaço, permite zero-shot e roda em CPU para centenas de imagens. |
 | Atributos quantitativos | OpenCV + OCR | Brilho, contraste, cor dominante, proporção de texto, preço visível. Explicáveis para o time de criação. |
 | Atributos qualitativos | Zero-shot CLIP com rótulos definidos pelo time | "Produto em destaque", "pessoa", "fundo claro", "preço/desconto", "lançamento". |
 | Estilos visuais | K-means sobre embeddings | Revela famílias de banner e permite comparar performance por família. |
-| Score | Regressão regularizada (MVP) → LightGBM | Prever receita por impressão a partir de embeddings + atributos + contexto. Começar simples. |
+| Score | Regressão regularizada ponderada por impressões | Estimar receita por impressão a partir de embeddings, atributos e contexto sem dar o mesmo peso a banners com volumes muito diferentes. |
 | Busca por similaridade | FAISS (fase de escala) | "Mostre banners parecidos com este que performaram bem." |
 | Serviço | Batch semanal (MVP) → API (escala) | O MVP não precisa de tempo real. |
 | Monitoramento | Drift dos embeddings e da receita por impressão | Nova identidade visual ou sazonalidade mudam o padrão. |
 
-Opção complementar: um LLM multimodal (via provedor homologado) pode gerar uma crítica em linguagem natural de cada banner frente ao guideline de marca. Útil para o lado qualitativo e para o time sem programação; custo por imagem e consistência precisam ser avaliados.
+CLIP B/32 é a régua (aberto, roda em CPU, custo zero); no MVP, comparamos com SigLIP 2 multilíngue e com um LLM multimodal homologado no mesmo conjunto rotulado, e fica o que acertar mais por real gasto. A tentativa local do SigLIP 2 não produziu resultado porque os pesos não estavam no cache e a conexão ao Hugging Face falhou na validação do certificado; o código com prompts em português ficou preparado no notebook.
+
+O LLM multimodal pode gerar uma crítica em linguagem natural frente ao guideline de marca. É útil para o lado qualitativo e para o time sem programação; custo por imagem, consistência, termos de uso e retenção dos dados pelo provedor precisam ser avaliados.
 
 ### 2.3 Prova de conceito: o que uma demo de 32 banners já mostra
 
-Para testar a peça central da arquitetura sem usar dado da marca, geramos 32 banners sintéticos com gabarito conhecido (fundo, cor, mensagem, preço, frasco) e rodamos o CLIP (`notebooks/04_demo_clip.ipynb`).
+Para testar a peça central da arquitetura sem usar dado da marca, geramos 32 banners sintéticos. Cada atributo do gabarito (fundo, cor, mensagem, preço e frasco) é sorteado separadamente com seed 42 e marginais balanceadas. O classificador é treinado com 24 banners e testado nos 8 restantes, em 4 rodadas; repetimos o particionamento 20 vezes e reportamos média (mínimo–máximo).
 
-| Atributo | Zero-shot (sem treino) | Clusters (sem rótulo) | Classificador com 24 exemplos rotulados |
-|---|---|---|---|
-| Cor dominante | 100% | — | 94% |
-| Mensagem (promoção × lançamento) | 31% | separa 100% | 100% |
-| Fundo claro × escuro | 56% | — | 66% |
-| Preço visível | 50% | — | 19% |
-| Frasco de produto | 50% | — | 25% |
+| Atributo | CLIP zero-shot | CLIP + 24 rótulos | Atributos simples |
+|---|---:|---:|---:|
+| Cor dominante | 100,0% | 94,8% (87,5–96,9%) | 95,0% (90,6–100,0%) |
+| Mensagem (promoção × lançamento) | 31,2% | 100,0% (100,0–100,0%) | 55,5% (46,9–65,6%) |
+| Fundo claro × escuro | 59,4% | 71,9% (53,1–87,5%) | 100,0% (100,0–100,0%) |
+| Preço visível | 50,0% | 54,7% (37,5–62,5%) | 100,0% (100,0–100,0%) |
+| Frasco de produto | 50,0% | 51,6% (34,4–65,6%) | 100,0% (100,0–100,0%) |
 
-Acaso = 50% nos atributos de duas classes. Velocidade: 38 ms por banner em CPU (10 mil banners ≈ 6 minutos).
+Acaso = 50% nos atributos binários e 25% na cor. Em CPU, após aquecimento, o lote ficou em 32,3 ms por banner (30,4–34,3; cinco repetições), projetando 10 mil banners em 5,4 minutos (5,1–5,7). Um banner por chamada ficou em 48,1 ms (47,4–49,2), ou 8,0 minutos para 10 mil.
 
 O que isso ensina para o MVP:
-1. **O embedding captura o que é grande e dominante** (cor, tipo de mensagem). Os clusters separaram promoção de lançamento sem nenhum rótulo.
-2. **Zero-shot depende de fazer a pergunta certa.** Prompts em inglês não casaram com "50% OFF" e "NOVO" em português. Com só 24 exemplos rotulados, um classificador simples acerta 100%. Rotular uma amostra pequena é exatamente o papel do time do hackathon.
-3. **Detalhes pequenos não aparecem no embedding global** (preço, frasco). Por isso a arquitetura combina embeddings com OCR e atributos quantitativos.
+1. **O embedding captura o que é grande e dominante** (cor e tipo de mensagem). Com 24 rótulos, o classificador chega a 100% em mensagem.
+2. **Zero-shot depende de linguagem e prompt.** Os prompts em inglês não casaram bem com "50% OFF" e "NOVO" em português. Um modelo multilíngue deve ser comparado no mesmo gabarito quando os pesos estiverem disponíveis.
+3. **Medidas simples complementam o embedding.** Brilho, contraste, cor média, bordas da caixa de preço e pixels do frasco acertaram fundo, preço e produto, justamente onde o embedding global ficou instável ou perto do acaso.
 
-Por que 19% e 25%, abaixo do acaso? Quando não há sinal, a validação cruzada com poucos exemplos tende a ficar abaixo de 50%: ao separar exemplos de uma classe para teste, o treino fica levemente enviesado para a outra. Leia como "atributo não detectado". E, para zero-shot com texto em português, a escolha natural é um CLIP multilíngue (ou SigLIP multilíngue), em vez do CLIP original treinado com legendas em inglês.
+No desenho anterior, preço e frasco eram derivados por paridade dos demais atributos, criando correlações que podiam se inverter entre treino e teste. Com sorteios independentes, o probe do CLIP volta para perto do acaso nesses dois atributos: 54,7% e 51,6% na média. Fundo contém algum sinal visual no embedding (71,9%), mas a faixa de 53,1% a 87,5% mostra a incerteza da amostra pequena.
 
 Limite: banners sintéticos são mais simples que os reais, e a demo não mede performance comercial (não há dado de clique). Ela valida componentes, não o score.
 
@@ -165,13 +167,13 @@ Limite: banners sintéticos são mais simples que os reais, e a demo não mede p
 | Peça | Especificação do MVP |
 |---|---|
 | Unidade | Um banner exibido em um espaço (posição) numa semana |
-| Alvo | Receita atribuída ÷ impressões (receita por impressão), em log |
+| Alvo | Receita atribuída ÷ impressões, com regressão ponderada por impressões; alternativa: modelar clique → pedido → receita usando impressões como exposição |
 | Variáveis da imagem | Componentes principais do embedding (≈ 20–50), atributos de OCR (preço visível, % de texto) e atributos quantitativos (cor, contraste) |
-| Controles | Efeitos fixos de posição e de semana, desconto da campanha e canal: o score compara banners dentro do mesmo espaço e período |
-| Modelo | Regressão regularizada no MVP (explicável); LightGBM se houver volume |
-| Validação | Temporal: treinar em campanhas passadas e medir, nas semanas seguintes, se o ranking do score acerta a ordem de receita por impressão dos banners de cada espaço (correlação de ranking) |
-| Saída | Nota relativa (percentil dentro do espaço) e os atributos que mais pesaram, para o time de criação |
-| Infraestrutura | Vetores guardados num índice vetorial (FAISS) junto ao catálogo do DAM; ~38 ms por banner em CPU, custo de cálculo desprezível |
+| Controles | Somente fatos conhecidos antes da publicação: canal, espaço, data planejada, campanha e desconto registrados no briefing; efeitos hierárquicos por espaço evitam misturar posições incomparáveis |
+| Modelo | Regressão regularizada no MVP; efeitos hierárquicos por espaço; LightGBM apenas se volume e ganho fora da amostra justificarem |
+| Validação | Temporal e agrupada por campanha: nenhuma peça da mesma campanha aparece simultaneamente em treino e teste; comparar ranking e calibração nas campanhas seguintes |
+| Saída | Nota relativa dentro do espaço, com intervalo de incerteza e atributos que mais pesaram; não publicar nota quando o intervalo for largo demais |
+| Infraestrutura | Vetores no catálogo do DAM; lote aquecido em CPU: 32,3 ms/banner em média, 10 mil em cerca de 5,4 minutos |
 
 ### 2.5 O ponto técnico que mais importa: causalidade
 
@@ -205,19 +207,21 @@ Equipe: 1 cientista de dados dedicado, apoio parcial de engenharia de dados e o 
 
 ### 3.3 Custo × retorno
 
-Todos os valores de custo, margem e ganho abaixo são **premissas ilustrativas** a substituir pelos números de Finanças. A receita mensal vem da base do case (R$ 490 mi em 8 meses ≈ R$ 61 mi/mês) e pode ser só parte do total real.
+Todos os valores de custo, margem e ganho são **premissas ilustrativas** a substituir pelos números de Finanças. A base do case soma R$ 490,3 milhões em oito meses, ou R$ 61,3 milhões/mês. Premissas: escopo + PoC + MVP = R$ 100 mil uma vez; operação = R$ 10 mil/mês; margem de contribuição = 30% da receita incremental.
 
-**Premissas:** custo do escopo + PoC + MVP = R$ 100 mil (uma vez); custo recorrente de operação = R$ 10 mil/mês; margem de contribuição = 30% da receita incremental.
+A ponte entre teste e resultado total é explícita: se `f` é a fração da receita mensal influenciada pelos espaços testados e `u` é o ganho relativo nesses espaços, o ganho equivalente sobre o e-commerce é `f × u`. Por exemplo, se os espaços influenciam 20% da receita, elevar esses espaços em 0,50% equivale a 0,10% da receita total. O histórico de atribuição deve estimar `f`; até lá, isto é premissa, não promessa.
 
-| Cenário | Ganho de receita (% da receita mensal) | Margem incremental/mês | Menos o custo recorrente | Payback |
-|---|---|---|---|---|
-| Pessimista | 0% (o A/B não mostra efeito) | R$ 0 | −R$ 10 mil | Não se paga: o projeto para no critério de parada, e a perda fica limitada ao custo do MVP |
-| Base | 0,1% (≈ R$ 61 mil) | ≈ R$ 18 mil | ≈ R$ 8 mil | ≈ 12 meses |
-| Otimista | 0,3% (≈ R$ 183 mil) | ≈ R$ 55 mil | ≈ R$ 45 mil | ≈ 2 meses |
+| Ganho equivalente sobre a receita mensal | Resultado com as premissas |
+|---:|---|
+| Abaixo de ≈ 0,05% | Não cobre nem os R$ 10 mil/mês de operação |
+| 0,10% | ≈ R$ 61,3 mil de receita, R$ 18,4 mil de margem e R$ 8,4 mil líquidos/mês; payback ≈ 12 meses |
+| 0,15% | ≈ R$ 92 mil de receita, R$ 27,6 mil de margem e R$ 17,6 mil líquidos/mês; payback ≈ 6 meses |
 
-**O A/B não consegue medir 0,1% da receita total.** Por isso o teste usa um **KPI intermediário detectável**, com a receita por impressão como guarda (não pode piorar):
-- Exemplo: CTR base de 2% no espaço testado; para detectar +5% relativo (2,0% → 2,1%) com 80% de poder e 5% de significância, são precisos ~310 mil impressões por variante. Em um espaço de home com tráfego alto, isso leva dias, não meses.
-- O ganho financeiro se confirma depois, acompanhando a receita por impressão do espaço por algumas semanas.
+O ponto exato que zera a operação é 0,054%; para recuperar R$ 100 mil em 12 meses, 0,100%; em seis meses, 0,145%. Se o A/B não mostrar efeito, o projeto para: a perda máxima é o gasto de escopo + PoC + MVP, R$ 100 mil, menor se um gate anterior interromper o trabalho. Não há custo recorrente depois da parada.
+
+**Plano do A/B:** randomização persistente por usuário, não por impressão. Para detectar **+5% relativo (2,0% → 2,1%)** no CTR, com teste bicaudal, 80% de poder e 5% de significância, a conta de duas proporções é `n = [1,96√(2×0,0205×0,9795) + 0,84√(0,020×0,980 + 0,021×0,979)]² / 0,001² = 315.206`, ou aproximadamente **315 mil usuários expostos por variante** (630 mil no total). Com a premissa de 100 mil usuários únicos elegíveis por dia no espaço, são cerca de 6,3 dias; com 50 mil/dia, 12,6 dias. O prazo deve ser atualizado com o tráfego real antes do teste.
+
+A receita por impressão é a guarda: a margem de não inferioridade proposta é **−1% relativo**, definida antes de abrir os dados. Só escalamos se o CTR subir e o limite inferior do intervalo de 95% da razão de receita por impressão ficar acima de 0,99. Finanças deve validar essa margem, e a receita continua sendo acompanhada por algumas semanas.
 
 **Custo de não fazer:** decisões de criativo continuam sem dado; o time do hackathon, desmotivado, tende a buscar ferramentas paralelas sem governança, exatamente o risco que a homologação quer evitar.
 
@@ -233,6 +237,9 @@ Retornos não financeiros: briefing de criação baseado em dado, menos tempo de
 | Correlação ≠ causa | Controles de posição/período e A/B obrigatório antes de escalar. |
 | Drift | Nova identidade visual ou campanha muda o padrão: monitorar e retreinar mensalmente. |
 | Dependência do time de dados | Interface simples para o time do hackathon e documentação; trilha de homologação para autonomia futura. |
+| Custo e tempo de rotulagem | Medir minutos por banner na PoC, limitar a taxonomia e amostrar casos de maior incerteza; incluir horas do time de criação no custo. |
+| Provedor externo de LLM | Só enviar material a provedor homologado; revisar termos de uso, retenção, treinamento com entradas e localização dos dados. |
+| Licença dos pesos | Registrar modelo, versão e licença; Jurídico confirma uso comercial e obrigações antes da produção. |
 
 ### 3.5 Roadmap
 

@@ -28,6 +28,15 @@ NOMES_WATERFALL = {
     "fourier_mes_cos1": "cosseno_mês_1",
     "fourier_mes_cos2": "cosseno_mês_2",
 }
+NOMES_NEGOCIO = {
+    "dias_ate_evento_presente": "dias até a data de presente",
+    "media_7_lag7": "nível da semana anterior",
+    "lag_7": "venda do mesmo dia na semana anterior",
+    "fourier_mes_sin1": "posição dentro do mês",
+    "taxa_desconto_media_7_lag7": "desconto médio da semana anterior",
+    "canal": "canal de venda",
+    "share_canal_lag7": "participação recente do canal",
+}
 
 
 def _semana(features: pd.DataFrame, origem: pd.Timestamp) -> pd.DataFrame:
@@ -214,7 +223,7 @@ def _prever_por_origem(
 def _permutation_importance(
     holdout: pd.DataFrame,
     modelos_por_nome: dict[str, dict[pd.Timestamp, Any]],
-) -> None:
+) -> pd.DataFrame:
     gerador = np.random.default_rng(42)
     linhas = []
     for nome in ["lightgbm", "ridge"]:
@@ -250,9 +259,36 @@ def _permutation_importance(
                     "aumento_wape_std": float(aumentos.std(ddof=1)),
                 }
             )
-    pd.DataFrame(linhas).sort_values(
+    importancia = pd.DataFrame(linhas).sort_values(
         ["modelo", "aumento_wape_media"], ascending=[True, False]
-    ).to_csv(PASTA_METRICAS / "permutation_importance.csv", index=False)
+    )
+    importancia.to_csv(PASTA_METRICAS / "permutation_importance.csv", index=False)
+    return importancia
+
+
+def _fig_importancia_negocio(importancia: pd.DataFrame) -> None:
+    top = (
+        importancia.loc[importancia["modelo"].eq("lightgbm")]
+        .nlargest(5, "aumento_wape_media")
+        .sort_values("aumento_wape_media")
+        .copy()
+    )
+    top["rotulo"] = top["feature"].map(NOMES_NEGOCIO).fillna(top["feature"])
+    fig, ax = plt.subplots(figsize=(9, 4.8))
+    ax.barh(top["rotulo"], top["aumento_wape_media"] * 100, color="#2F5D8A")
+    ax.set_xlabel("Aumento do WAPE ao embaralhar a variável (p.p.)")
+    ax.set_title("As variáveis que mais sustentam a previsão")
+    ax.text(
+        0,
+        -0.2,
+        "Referência: LightGBM seed 42; importância por permutação no diagnóstico de junho.",
+        transform=ax.transAxes,
+        fontsize=8,
+        color="#4D4D4D",
+    )
+    fig.subplots_adjust(bottom=0.24, left=0.33)
+    fig.savefig(PASTA_FIGURAS / "importancia_negocio.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _nome_coeficiente(nome: str) -> str:
@@ -334,7 +370,8 @@ def gerar_explicacoes(
         & features["data"].le("2026-06-30")
     ].copy()
     top5 = _salvar_shap(features, modelos_por_nome["lightgbm"])
-    _permutation_importance(holdout, modelos_por_nome)
+    importancia = _permutation_importance(holdout, modelos_por_nome)
+    _fig_importancia_negocio(importancia)
     _salvar_coeficientes(
         modelos_por_nome["ridge"][pd.Timestamp("2026-05-31")]
     )

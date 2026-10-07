@@ -1,0 +1,13 @@
+recorte,modelo,n_blocos,n_dias,wape_diario,vies,erro_semanal_semanas_cheias,erro_semanal_blocos_parciais,lightgbm_referencia,diferenca_wape_combinacao_menos_modelo,ic95_diferenca_wape_low,ic95_diferenca_wape_high,p_combinacao_menor
+junho,sarima_log,5,30,0.24041765,-0.04583102,0.06103916,0.08647562,seed_-1_media_seeds_42_a_46,-0.05241970,-0.11199369,0.02146029,0.92000000
+junho,lightgbm,5,30,0.20099054,-0.00523539,0.10099023,0.11768252,seed_-1_media_seeds_42_a_46,-0.01299259,-0.04020338,0.01140831,0.82750000
+junho,combinacao,5,30,0.18799795,-0.04583102,0.06103916,0.08647562,seed_-1_media_seeds_42_a_46,,,,
+junho,media_movel_7,5,30,0.31198466,-0.02440931,0.21630833,0.23388894,seed_-1_media_seeds_42_a_46,,,,
+walkforward_avaliacao,sarima_log,11,75,0.21270398,-0.10400876,0.15701472,0.15437925,seed_-1_media_seeds_42_a_46,0.00042712,-0.02428884,0.03224770,0.48700000
+walkforward_avaliacao,lightgbm,11,75,0.22313209,-0.03174432,0.15353052,0.16094635,seed_-1_media_seeds_42_a_46,-0.01000098,-0.06130417,0.03552189,0.67950000
+walkforward_avaliacao,combinacao,11,75,0.21313110,-0.10400876,0.15701472,0.15437925,seed_-1_media_seeds_42_a_46,,,,
+walkforward_avaliacao,media_movel_7,11,75,0.22814775,-0.03206258,0.16228084,0.18152344,seed_-1_media_seeds_42_a_46,,,,
+dezesseis_semanas,sarima_log,16,105,0.22030055,-0.08806172,0.13144198,0.13576625,seed_-1_media_seeds_42_a_46,-0.01405867,-0.04210941,0.01452228,0.82150000
+dezesseis_semanas,lightgbm,16,105,0.21706289,-0.02447798,0.13953113,0.14908735,seed_-1_media_seeds_42_a_46,-0.01082101,-0.04767521,0.02368287,0.72800000
+dezesseis_semanas,combinacao,16,105,0.20624188,-0.08806172,0.13144198,0.13576625,seed_-1_media_seeds_42_a_46,,,,
+dezesseis_semanas,media_movel_7,16,105,0.25112820,-0.02996475,0.17667649,0.19587730,seed_-1_media_seeds_42_a_46,,,,

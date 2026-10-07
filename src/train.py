@@ -16,18 +16,30 @@ from src.data_loader import load_daily
 from src.evaluate import (
     METRICAS,
     agregar_total,
+    bias,
     bootstrap_ci,
     paired_bootstrap_diff,
+    paired_bootstrap_values,
     selecionar_previsao_ensemble,
     wape,
     wape_total_por_data,
 )
+from src.calendario import EVENTOS, feriados_br
 from src.features import build_features
 from src.models import criar_modelo
 
 
 SEEDS = range(42, 47)
-MODELOS = ["naive_sazonal", "media_movel_7", "ridge", "xgboost", "lightgbm"]
+MODELOS = [
+    "naive_sazonal",
+    "media_movel_7",
+    "ets_log",
+    "sarima_log",
+    "sarimax_log",
+    "ridge",
+    "xgboost",
+    "lightgbm",
+]
 PASTA_DADOS = Path("data/processed")
 PASTA_METRICAS = Path("reports/metrics")
 PASTA_MODELOS = Path("models")
@@ -35,9 +47,12 @@ LIMITE_WALKFORWARD = pd.Timestamp("2026-05-31")
 ORDEM_SIMPLICIDADE = {
     "naive_sazonal": 0,
     "media_movel_7": 1,
-    "ridge": 2,
-    "xgboost": 3,
-    "lightgbm": 3,
+    "ets_log": 2,
+    "sarima_log": 2,
+    "sarimax_log": 2,
+    "ridge": 3,
+    "xgboost": 4,
+    "lightgbm": 4,
 }
 
 
@@ -198,11 +213,12 @@ def prever_origens(
     origens: list[pd.Timestamp],
     parametros: dict[str, dict[str, Any]],
     modelos_por_origem: dict[str, dict[pd.Timestamp, Any]] | None = None,
+    modelos: list[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Retreina por origem e guarda seeds e media do ensemble."""
     partes = []
     tempos = []
-    for nome in MODELOS:
+    for nome in modelos or MODELOS:
         inicio = time.perf_counter()
         for origem in origens:
             treino, teste = criar_fold(df, origem)
@@ -286,6 +302,215 @@ def gerar_contraprova(
     return pd.DataFrame(linhas)
 
 
+def gerar_torneio_16_semanas(
+    walkforward: pd.DataFrame, holdout: pd.DataFrame
+) -> pd.DataFrame:
+    """Resume erro diario e semanal nos tres recortes de decisao."""
+    selecionadas = {
+        "junho": selecionar_previsao_ensemble(holdout),
+        "walkforward_avaliacao": selecionar_previsao_ensemble(walkforward),
+    }
+    selecionadas["dezesseis_semanas"] = pd.concat(
+        selecionadas.values(), ignore_index=True
+    )
+    linhas = []
+    for recorte, previsoes in selecionadas.items():
+        total = agregar_total(previsoes)
+        for modelo, parte in total.groupby("modelo"):
+            semanas = parte.groupby("origem", as_index=False).agg(
+                y=("y", "sum"), y_hat=("y_hat", "sum"), n_dias=("data", "nunique")
+            )
+            cheias = semanas.loc[semanas["n_dias"].eq(7)]
+            linhas.append(
+                {
+                    "recorte": recorte,
+                    "modelo": modelo,
+                    "n_blocos": len(semanas),
+                    "n_dias": parte["data"].nunique(),
+                    "wape_diario": wape(parte["y"], parte["y_hat"]),
+                    "vies": bias(parte["y"], parte["y_hat"]),
+                    "erro_semanal_semanas_cheias": wape(
+                        cheias["y"], cheias["y_hat"]
+                    ),
+                    "erro_semanal_blocos_parciais": wape(
+                        semanas["y"], semanas["y_hat"]
+                    ),
+                }
+            )
+    return pd.DataFrame(linhas)
+
+
+def gerar_contraprova_semanal(
+    walkforward: pd.DataFrame, holdout: pd.DataFrame
+) -> pd.DataFrame:
+    """Compara o erro semanal do LightGBM em semanas completas."""
+    selecionadas = {
+        "junho": selecionar_previsao_ensemble(holdout),
+        "walkforward_avaliacao": selecionar_previsao_ensemble(walkforward),
+    }
+    selecionadas["dezesseis_semanas"] = pd.concat(
+        selecionadas.values(), ignore_index=True
+    )
+    linhas = []
+    for recorte, previsoes in selecionadas.items():
+        semanas = agregar_total(previsoes).groupby(
+            ["modelo", "origem"], as_index=False
+        ).agg(
+            y=("y", "sum"),
+            y_hat=("y_hat", "sum"),
+            n_dias=("data", "nunique"),
+        )
+        cheias = semanas.loc[semanas["n_dias"].eq(7)]
+        lightgbm = cheias.loc[cheias["modelo"].eq("lightgbm")]
+        for modelo in MODELOS:
+            if modelo == "lightgbm":
+                continue
+            comparacao = cheias.loc[
+                cheias["modelo"].isin(["lightgbm", modelo])
+            ]
+            resultado = paired_bootstrap_diff(
+                comparacao, "lightgbm", modelo, n=2000, seed=42
+            )
+            referencia = cheias.loc[cheias["modelo"].eq(modelo)]
+            linhas.append(
+                {
+                    "recorte": recorte,
+                    "modelo_a": "lightgbm",
+                    "modelo_b": modelo,
+                    "wape_semanal_a": wape(lightgbm["y"], lightgbm["y_hat"]),
+                    "wape_semanal_b": wape(
+                        referencia["y"], referencia["y_hat"]
+                    ),
+                    **resultado,
+                    "n_semanas_cheias": int(comparacao["origem"].nunique()),
+                }
+            )
+    return pd.DataFrame(linhas)
+
+
+def gerar_nao_inferioridade(
+    walkforward: pd.DataFrame, holdout: pd.DataFrame
+) -> pd.DataFrame:
+    """Compara o LightGBM por blocos e estima o poder da regra original."""
+    combinado = pd.concat(
+        [
+            selecionar_previsao_ensemble(walkforward),
+            selecionar_previsao_ensemble(holdout),
+        ],
+        ignore_index=True,
+    )
+    total_16 = agregar_total(combinado)
+    linhas: list[dict[str, Any]] = []
+    for referencia in ["media_movel_7", "ets_log", "sarima_log", "sarimax_log"]:
+        resultado = paired_bootstrap_diff(
+            total_16, "lightgbm", referencia, n=2000, seed=42
+        )
+        linhas.append(
+            {
+                "tipo": "nao_inferioridade",
+                "recorte": "dezesseis_semanas",
+                "modelo_a": "lightgbm",
+                "modelo_b": referencia,
+                **resultado,
+                "n_blocos": int(total_16["origem"].nunique()),
+                "mde_80": np.nan,
+            }
+        )
+    for recorte, previsoes in [
+        ("junho", holdout),
+        ("walkforward_avaliacao", walkforward),
+    ]:
+        total = agregar_total(selecionar_previsao_ensemble(previsoes))
+        resultado = paired_bootstrap_diff(
+            total, "lightgbm", "media_movel_7", n=2000, seed=42
+        )
+        valores = paired_bootstrap_values(
+            total, "lightgbm", "media_movel_7", n=2000, seed=42
+        )
+        linhas.append(
+            {
+                "tipo": "mde_regra_original",
+                "recorte": recorte,
+                "modelo_a": "lightgbm",
+                "modelo_b": "media_movel_7",
+                **resultado,
+                "n_blocos": int(total["origem"].nunique()),
+                "mde_80": float(np.std(valores, ddof=1) * 2.801585218),
+            }
+        )
+    return pd.DataFrame(linhas)
+
+
+def gerar_vies_segmento(
+    resumo: pd.DataFrame,
+    walkforward: pd.DataFrame,
+    holdout: pd.DataFrame,
+    features: pd.DataFrame,
+) -> pd.DataFrame:
+    """Explicita a compensacao de vies entre eventos e dias normais."""
+    colunas = ["modelo", "conjunto", "segmento", "bias"]
+    combinado = pd.concat(
+        [
+            selecionar_previsao_ensemble(walkforward),
+            selecionar_previsao_ensemble(holdout),
+        ],
+        ignore_index=True,
+    )
+    resumo_16 = resumir_metricas(combinado, features, "dezesseis_semanas")
+    return (
+        pd.concat([resumo, resumo_16], ignore_index=True).loc[
+            lambda df: df["modelo"].isin(MODELOS)
+            & df["granularidade"].eq("total")
+            & df["segmento"].isin(["evento/janela de evento", "dia normal"]),
+            colunas,
+        ]
+        .replace({"holdout": "junho", "walkforward": "walkforward_avaliacao"})
+        .rename(columns={"bias": "vies"})
+        .reset_index(drop=True)
+    )
+
+
+def gerar_viradas_calendario(
+    walkforward: pd.DataFrame, holdout: pd.DataFrame
+) -> pd.DataFrame:
+    """Avalia os criterios A e B definidos antes de observar a venda."""
+    previsoes = selecionar_previsao_ensemble(
+        pd.concat([walkforward, holdout], ignore_index=True)
+    )
+    total = agregar_total(previsoes)
+    datas_eventos = [pd.Timestamp(data) for data in EVENTOS]
+    datas_feriados = [pd.Timestamp(data) for data in feriados_br([2025, 2026])]
+    blocos = total.groupby("origem").agg(inicio=("data", "min"), fim=("data", "max"))
+
+    def contem(datas: list[pd.Timestamp], inicio: pd.Timestamp, fim: pd.Timestamp) -> bool:
+        return any(inicio <= data <= fim for data in datas)
+
+    blocos["criterio_a"] = [
+        contem(datas_eventos + datas_feriados, linha.inicio - pd.Timedelta(days=7), linha.fim)
+        for linha in blocos.itertuples()
+    ]
+    blocos["criterio_b"] = [
+        contem(datas_eventos, linha.inicio - pd.Timedelta(days=7), linha.fim + pd.Timedelta(days=7))
+        for linha in blocos.itertuples()
+    ]
+    base = total.merge(blocos[["criterio_a", "criterio_b"]], left_on="origem", right_index=True)
+    linhas = []
+    for criterio in ["criterio_a", "criterio_b"]:
+        for grupo in [True, False]:
+            for modelo in ["lightgbm", "media_movel_7"]:
+                parte = base.loc[base[criterio].eq(grupo) & base["modelo"].eq(modelo)]
+                linhas.append(
+                    {
+                        "criterio": criterio,
+                        "grupo_com_data": grupo,
+                        "modelo": modelo,
+                        "n_semanas": int(parte["origem"].nunique()),
+                        "wape": wape(parte["y"], parte["y_hat"]),
+                    }
+                )
+    return pd.DataFrame(linhas)
+
+
 def aplicar_regra_decisao(
     resumo: pd.DataFrame, previsoes: pd.DataFrame, conjunto: str
 ) -> dict[str, Any]:
@@ -298,9 +523,11 @@ def aplicar_regra_decisao(
     ]
     candidato = str(metricas.loc[metricas["wape"].idxmin(), "modelo"])
     base = agregar_total(selecionar_previsao_ensemble(previsoes))
+    disponiveis = set(metricas["modelo"]) & set(base["modelo"])
     mais_simples = [
         modelo for modelo in MODELOS
-        if ORDEM_SIMPLICIDADE[modelo] < ORDEM_SIMPLICIDADE[candidato]
+        if modelo in disponiveis
+        and ORDEM_SIMPLICIDADE[modelo] < ORDEM_SIMPLICIDADE[candidato]
     ]
     empates = []
     for modelo in mais_simples:
@@ -389,23 +616,102 @@ def _salvar_tabela(df: pd.DataFrame, nome: str) -> None:
     df.to_csv(PASTA_METRICAS / nome, index=False, float_format="%.8f")
 
 
+def gerar_walkforward_inicio_serie(features: pd.DataFrame) -> pd.DataFrame:
+    """Avalia origens iniciais com duas exigencias minimas de historico."""
+    parametros = json.loads(
+        (PASTA_METRICAS / "melhores_hiperparametros.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    primeira_data = pd.Timestamp(features["data"].min())
+    origens_existentes = set(origens_pre_holdout())
+    candidatas = []
+    origem = pd.Timestamp("2026-01-06") - pd.Timedelta(days=7)
+    while origem >= primeira_data:
+        if origem not in origens_existentes:
+            candidatas.append(origem)
+        origem -= pd.Timedelta(days=7)
+    candidatas.sort()
+
+    linhas = []
+    for min_treino_dias in [42, 28]:
+        origens = []
+        dias_treino = {}
+        for origem in candidatas:
+            treino, _ = criar_fold(features, origem)
+            n_dias = int(treino["data"].nunique())
+            if n_dias >= min_treino_dias:
+                origens.append(origem)
+                dias_treino[origem] = n_dias
+        if not origens:
+            continue
+
+        previsoes, _ = prever_origens(features, origens, parametros)
+        total = agregar_total(selecionar_previsao_ensemble(previsoes))
+        for (origem, modelo), parte in total.groupby(["origem", "modelo"]):
+            datas = set(pd.to_datetime(parte["data"]).dt.normalize())
+            linhas.append(
+                {
+                    "min_treino_dias": min_treino_dias,
+                    "origem": pd.Timestamp(origem).strftime("%Y-%m-%d"),
+                    "n_dias_treino": dias_treino[pd.Timestamp(origem)],
+                    "modelo": modelo,
+                    "wape_diario": wape(parte["y"], parte["y_hat"]),
+                    "vies": bias(parte["y"], parte["y_hat"]),
+                    "erro_semanal": wape(
+                        [parte["y"].sum()], [parte["y_hat"].sum()]
+                    ),
+                    "n_dias_previstos": int(parte["data"].nunique()),
+                    "contem_black_friday": pd.Timestamp("2025-11-28") in datas,
+                    "contem_natal": pd.Timestamp("2025-12-25") in datas,
+                }
+            )
+
+        for modelo, parte in total.groupby("modelo"):
+            semanas = parte.groupby("origem", as_index=False).agg(
+                y=("y", "sum"), y_hat=("y_hat", "sum")
+            )
+            datas = set(pd.to_datetime(parte["data"]).dt.normalize())
+            linhas.append(
+                {
+                    "min_treino_dias": min_treino_dias,
+                    "origem": "TOTAL",
+                    "n_dias_treino": pd.NA,
+                    "modelo": modelo,
+                    "wape_diario": wape(parte["y"], parte["y_hat"]),
+                    "vies": bias(parte["y"], parte["y_hat"]),
+                    "erro_semanal": wape(semanas["y"], semanas["y_hat"]),
+                    "n_dias_previstos": int(parte["data"].nunique()),
+                    "contem_black_friday": pd.Timestamp("2025-11-28") in datas,
+                    "contem_natal": pd.Timestamp("2025-12-25") in datas,
+                }
+            )
+    return pd.DataFrame(linhas)
+
+
 def main() -> None:
     """Roda o torneio completo e imprime o holdout total."""
     np.random.seed(42)
     PASTA_DADOS.mkdir(parents=True, exist_ok=True)
     PASTA_METRICAS.mkdir(parents=True, exist_ok=True)
     features = build_features(load_daily(by=["canal"]))
+    inicio_serie = gerar_walkforward_inicio_serie(features)
+    _salvar_tabela(inicio_serie, "walkforward_inicio_serie.csv")
 
     parametros, historico_optuna = ajustar_hiperparametros(features)
     (PASTA_METRICAS / "melhores_hiperparametros.json").write_text(
         json.dumps(parametros, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     walkforward, tempos = prever_origens(features, origens_avaliacao(), parametros)
+    tuning, _ = prever_origens(
+        features, origens_tuning(), parametros, modelos=["lightgbm"]
+    )
     modelos_holdout: dict[str, dict[pd.Timestamp, Any]] = {}
     holdout, _ = prever_origens(
         features, origens_holdout(), parametros, modelos_holdout
     )
     walkforward.to_parquet(PASTA_DADOS / "predicoes_walkforward.parquet", index=False)
+    tuning.to_parquet(PASTA_DADOS / "predicoes_tuning.parquet", index=False)
     holdout.to_parquet(PASTA_DADOS / "predicoes_holdout.parquet", index=False)
 
     resumo = pd.concat(
@@ -418,10 +724,20 @@ def main() -> None:
     contraprova = gerar_contraprova(walkforward, holdout)
     decisao = gerar_decisao(resumo, walkforward, holdout, contraprova)
     variabilidade = gerar_variabilidade(walkforward, holdout)
+    torneio = gerar_torneio_16_semanas(walkforward, holdout)
+    contraprova_semanal = gerar_contraprova_semanal(walkforward, holdout)
+    nao_inferioridade = gerar_nao_inferioridade(walkforward, holdout)
+    vies_segmento = gerar_vies_segmento(resumo, walkforward, holdout, features)
+    viradas = gerar_viradas_calendario(walkforward, holdout)
     _salvar_tabela(resumo, "resumo_metricas.csv")
     _salvar_tabela(contraprova, "contraprova.csv")
     _salvar_tabela(variabilidade, "variabilidade_seeds.csv")
     _salvar_tabela(tempos, "tempos.csv")
+    _salvar_tabela(torneio, "torneio_16_semanas.csv")
+    _salvar_tabela(contraprova_semanal, "contraprova_semanal.csv")
+    _salvar_tabela(nao_inferioridade, "nao_inferioridade.csv")
+    _salvar_tabela(vies_segmento, "vies_segmento.csv")
+    _salvar_tabela(viradas, "viradas_calendario.csv")
     (PASTA_METRICAS / "decisao.json").write_text(
         json.dumps(decisao, indent=2, ensure_ascii=False), encoding="utf-8"
     )

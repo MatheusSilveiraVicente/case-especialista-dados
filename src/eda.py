@@ -11,6 +11,8 @@ from src.data_loader import CATEGORIA_NAO_MAPEADA, clean, complete_grid, load_ra
 
 FIG_DIR = Path("reports/figures")
 DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
+FAIXAS_HORARIAS = ["Madrugada", "Manhã", "Tarde", "Noite"]
 CORES = {"App": "#7a3e9d", "Site": "#2a9d8f", "Total": "#264653"}
 EVENTOS_PLOT = {
     "2025-11-11": "11.11",
@@ -44,6 +46,14 @@ def _mi(ax):
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"R$ {v / 1e6:.0f} mi"))
 
 
+def _mes_ano(data: pd.Timestamp) -> str:
+    return f"{MESES[data.month - 1]}/{str(data.year)[2:]}"
+
+
+def titulo_preco_desconto() -> str:
+    return r"Menos desconto, ticket maior: de R\$ 59 em nov para R\$ 93 em jun"
+
+
 def kpis_gerais(g: pd.DataFrame) -> pd.Series:
     t = g[["receita", "pedidos", "itens", "desconto", "receita_bruta", "estorno"]].sum()
     return pd.Series({
@@ -68,7 +78,9 @@ def fig_serie_diaria(g):
                     ha="center", fontsize=8, arrowprops=dict(arrowstyle="-", alpha=0.4))
     _mi(ax)
     ax.set_ylim(0, d["receita"].max() * 1.15)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b/%y"))
+    ax.xaxis.set_major_formatter(
+        plt.FuncFormatter(lambda valor, _: _mes_ano(pd.Timestamp(mdates.num2date(valor))))
+    )
     ax.set_title("Receita diária: novembro é outro negócio; depois, sem tendência e com picos de data")
     ax.legend(loc="upper right")
     return _salvar(fig, "eda_01_serie_diaria.png")
@@ -79,9 +91,12 @@ def indice_dia_semana(g, excluir_novembro=True):
     if excluir_novembro:
         d = d[d["data"].dt.month != 11]
     d["dia_semana"] = d["data"].dt.dayofweek
-    idx = d.groupby(["canal", "dia_semana"])["receita"].mean()
-    idx = idx / idx.groupby("canal").transform("mean")
-    return idx.unstack("canal")
+    por_canal = d.groupby(["canal", "dia_semana"])["receita"].mean()
+    por_canal = por_canal / por_canal.groupby("canal").transform("mean")
+    total = d.groupby(["data", "dia_semana"], as_index=False)["receita"].sum()
+    indice_total = total.groupby("dia_semana")["receita"].mean()
+    indice_total = indice_total / indice_total.mean()
+    return por_canal.unstack("canal").assign(Total=indice_total)
 
 
 def fig_dia_semana(g):
@@ -98,8 +113,9 @@ def fig_dia_semana(g):
     return _salvar(fig, "eda_02_dia_semana.png")
 
 
-def curva_intradia(g):
-    h = g.groupby(["canal", "hora"])["receita"].sum()
+def curva_intradia(g, excluir_novembro=True):
+    base = g.loc[g["mes"].dt.month.ne(11)] if excluir_novembro else g
+    h = base.groupby(["canal", "hora"])["receita"].sum()
     return (h / h.groupby("canal").transform("sum")).unstack("canal")
 
 
@@ -110,7 +126,7 @@ def fig_intradia(g):
         axes[0].plot(c.index, c[canal] * 100, marker="o", ms=3, color=CORES[canal], label=canal)
     axes[0].set_xlabel("Hora do dia")
     axes[0].set_ylabel("% da receita do canal")
-    axes[0].set_title("Curva de vendas ao longo do dia")
+    axes[0].set_title("Os dois canais picam às 11h; à noite, o App segura mais")
     axes[0].set_xticks(range(0, 24, 3))
     axes[0].legend()
 
@@ -139,7 +155,7 @@ def mensal(g):
 
 def fig_preco_desconto(g):
     m = mensal(g)
-    x = m.index.strftime("%b/%y")
+    x = [_mes_ano(periodo.to_timestamp()) for periodo in m.index]
     fig, ax1 = plt.subplots(figsize=(9, 3.8))
     ax1.plot(x, m["ticket_medio"], marker="o", color=CORES["Total"], lw=2, label="Ticket médio (R$)")
     ax1.plot(x, m["preco_medio"], marker="s", color=CORES["Site"], lw=2, label="Preço médio por item (R$)")
@@ -153,8 +169,55 @@ def fig_preco_desconto(g):
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="lower right", fontsize=8)
-    ax1.set_title("Menos desconto, ticket maior: de R$ 59 em nov para R$ 93 em jun")
+    ax1.set_title(titulo_preco_desconto())
     return _salvar(fig, "eda_04_preco_desconto.png")
+
+
+def intradia_ticket_mix(g: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Ticket e mix de categorias por faixa horaria, sem novembro."""
+    sub = g.loc[g["mes"].dt.month.ne(11)].copy()
+    sub["faixa_horaria"] = pd.cut(
+        sub["hora"], [-1, 6, 11, 17, 23], labels=FAIXAS_HORARIAS
+    )
+    totais = sub.groupby(["canal", "faixa_horaria"], observed=True)[
+        ["receita", "pedidos"]
+    ].sum()
+    ticket = totais["receita"].div(totais["pedidos"]).unstack("canal")
+    legiveis = sub.loc[sub["categoria"].ne(CATEGORIA_NAO_MAPEADA)]
+    mix = legiveis.groupby(
+        ["canal", "faixa_horaria", "categoria"], observed=True
+    )["receita"].sum()
+    mix = mix.div(
+        mix.groupby(level=[0, 1], observed=True).transform("sum")
+    ).unstack("categoria")
+    return ticket, mix
+
+
+def fig_intradia_ticket_mix(g: pd.DataFrame):
+    ticket, mix = intradia_ticket_mix(g)
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.8), gridspec_kw={"width_ratios": [0.8, 1.5]})
+    ticket.plot.bar(ax=axes[0], color=[CORES[canal] for canal in ticket.columns])
+    axes[0].set_title("Ticket médio por faixa horária")
+    axes[0].set_xlabel("")
+    axes[0].set_ylabel("R$ por pedido")
+    axes[0].tick_params(axis="x", rotation=0)
+    mix.plot.bar(stacked=True, ax=axes[1], colormap="tab20c")
+    axes[1].set_title("Mix de categorias por canal e faixa horária")
+    axes[1].set_xlabel("Canal e faixa horária")
+    axes[1].set_ylabel("% da receita legível")
+    axes[1].yaxis.set_major_formatter(plt.FuncFormatter(lambda valor, _: f"{valor:.0%}"))
+    axes[1].tick_params(axis="x", rotation=35)
+    axes[1].legend(title="Categoria", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=7)
+    fig.suptitle("Intradia sem novembro: valor do pedido e cesta mudam ao longo do dia")
+    return _salvar(fig, "eda_07_intradia_ticket_mix.png")
+
+
+def estornos_por_dimensao(g: pd.DataFrame, dimensao: str) -> pd.DataFrame:
+    """Resume estornos em reais e como proporcao da receita liquida."""
+    resumo = g.groupby(dimensao)[["receita", "estorno"]].sum()
+    resumo["estorno_rs"] = -resumo["estorno"]
+    resumo["estorno_pct_receita"] = resumo["estorno_rs"].div(resumo["receita"])
+    return resumo.drop(columns="estorno").sort_values("estorno_rs", ascending=False)
 
 
 def indice_categoria_dia(g):
@@ -217,6 +280,6 @@ def eventos(g):
 def gerar_todas(path="data/raw/vendas.csv"):
     g = carregar_grade(path)
     figs = [f(g) for f in (fig_serie_diaria, fig_dia_semana, fig_intradia,
-                           fig_preco_desconto, fig_categoria_dia)]
+                           fig_preco_desconto, fig_categoria_dia, fig_intradia_ticket_mix)]
     plt.close("all")
     return g, figs

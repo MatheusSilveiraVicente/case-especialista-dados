@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import warnings
 from typing import Any
 
 import numpy as np
@@ -12,9 +14,108 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 from xgboost import XGBRegressor
 
 from src.features import feature_columns
+
+
+LOGGER = logging.getLogger(__name__)
+EXOGENAS_ESTATISTICAS = [
+    "is_feriado",
+    "is_vespera_feriado",
+    "is_novembro",
+    "is_evento",
+]
+
+
+def _exogenas_estatisticas(df: pd.DataFrame) -> pd.DataFrame:
+    x = df[EXOGENAS_ESTATISTICAS].astype(float).copy()
+    x["pre_presente"] = df["dias_ate_evento_presente"].le(7).astype(float)
+    x["pre_promocao"] = df["dias_ate_evento_promo"].le(7).astype(float)
+    return x
+
+
+class _EstatisticoPorCanal:
+    nome = "estatistico"
+
+    def fit(self, train_df: pd.DataFrame) -> "_EstatisticoPorCanal":
+        self.ajustes_: dict[str, Any] = {}
+        self.avisos_convergencia_: list[str] = []
+        for canal, parte in train_df.sort_values("data").groupby("canal"):
+            with warnings.catch_warnings(record=True) as capturados:
+                warnings.simplefilter("always", ConvergenceWarning)
+                self.ajustes_[str(canal)] = self._ajustar(parte)
+            for aviso in capturados:
+                if issubclass(aviso.category, ConvergenceWarning):
+                    mensagem = f"{self.nome}/{canal}: {aviso.message}"
+                    self.avisos_convergencia_.append(mensagem)
+                    LOGGER.warning(mensagem)
+        return self
+
+    def predict(self, test_df: pd.DataFrame) -> np.ndarray:
+        previsto = pd.Series(index=test_df.index, dtype=float)
+        for canal, parte in test_df.groupby("canal"):
+            ordenado = parte.sort_values("data")
+            valores = self._prever(self.ajustes_[str(canal)], ordenado)
+            previsto.loc[ordenado.index] = np.exp(valores)
+        if previsto.isna().any():
+            raise ValueError("Ha linhas sem previsao estatistica")
+        return np.clip(previsto.loc[test_df.index].to_numpy(), 0, None)
+
+    def _ajustar(self, treino: pd.DataFrame) -> Any:
+        raise NotImplementedError
+
+    def _prever(self, ajuste: Any, teste: pd.DataFrame) -> np.ndarray:
+        raise NotImplementedError
+
+
+class ETSLogSemanal(_EstatisticoPorCanal):
+    nome = "ets_log"
+
+    def _ajustar(self, treino: pd.DataFrame) -> Any:
+        alvo = np.log(treino["y"].clip(lower=1).to_numpy())
+        return ExponentialSmoothing(
+            alvo, trend=None, seasonal="add", seasonal_periods=7
+        ).fit()
+
+    def _prever(self, ajuste: Any, teste: pd.DataFrame) -> np.ndarray:
+        return np.asarray(ajuste.forecast(len(teste)))
+
+
+class SARIMALogSemanal(_EstatisticoPorCanal):
+    nome = "sarima_log"
+
+    def _ajustar(self, treino: pd.DataFrame) -> Any:
+        alvo = np.log(treino["y"].clip(lower=1).to_numpy())
+        return SARIMAX(
+            alvo, order=(1, 0, 1), seasonal_order=(0, 1, 1, 7)
+        ).fit(disp=False)
+
+    def _prever(self, ajuste: Any, teste: pd.DataFrame) -> np.ndarray:
+        return np.asarray(ajuste.forecast(len(teste)))
+
+
+class SARIMAXLogSemanal(_EstatisticoPorCanal):
+    nome = "sarimax_log"
+
+    def _ajustar(self, treino: pd.DataFrame) -> Any:
+        alvo = np.log(treino["y"].clip(lower=1).to_numpy())
+        return SARIMAX(
+            alvo,
+            exog=_exogenas_estatisticas(treino).to_numpy(),
+            order=(1, 0, 1),
+            seasonal_order=(0, 1, 1, 7),
+        ).fit(disp=False)
+
+    def _prever(self, ajuste: Any, teste: pd.DataFrame) -> np.ndarray:
+        return np.asarray(
+            ajuste.forecast(
+                len(teste), exog=_exogenas_estatisticas(teste).to_numpy()
+            )
+        )
 
 
 class NaiveSazonal:
@@ -158,12 +259,27 @@ class LightGBMSemanal(_ArvoreCategorias):
 
 def criar_modelo(
     nome: str, params: dict[str, Any] | None = None, random_state: int = 42
-) -> NaiveSazonal | MediaMovel7 | RidgeSemanal | XGBoostSemanal | LightGBMSemanal:
+) -> (
+    NaiveSazonal
+    | MediaMovel7
+    | ETSLogSemanal
+    | SARIMALogSemanal
+    | SARIMAXLogSemanal
+    | RidgeSemanal
+    | XGBoostSemanal
+    | LightGBMSemanal
+):
     """Cria um modelo pelo nome usado nos relatorios."""
     if nome == "naive_sazonal":
         return NaiveSazonal()
     if nome == "media_movel_7":
         return MediaMovel7()
+    if nome == "ets_log":
+        return ETSLogSemanal()
+    if nome == "sarima_log":
+        return SARIMALogSemanal()
+    if nome == "sarimax_log":
+        return SARIMAXLogSemanal()
     if nome == "ridge":
         return RidgeSemanal(alpha=float((params or {}).get("alpha", 1.0)))
     if nome == "xgboost":

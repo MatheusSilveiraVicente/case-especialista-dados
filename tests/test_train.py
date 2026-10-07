@@ -1,10 +1,18 @@
+import json
+
 import numpy as np
 import pandas as pd
 
+import src.train as train_module
+
 from src.models import NaiveSazonal
 from src.train import (
+    MODELOS,
     aplicar_regra_decisao,
     criar_fold,
+    gerar_contraprova_semanal,
+    gerar_walkforward_inicio_serie,
+    gerar_vies_segmento,
     origens_avaliacao,
     origens_holdout,
     origens_pre_holdout,
@@ -103,3 +111,206 @@ def test_decisao_vitoria_clara_mantem_candidato() -> None:
         _resumo_decisao(), _previsoes_decisao(100.0, 120.0), "teste"
     )
     assert decisao["vencedor"] == "ridge"
+
+
+def _previsoes_semanais(previsao_lightgbm: list[float] | None = None) -> pd.DataFrame:
+    datas = [
+        *pd.date_range("2026-01-01", periods=7),
+        *pd.date_range("2026-01-08", periods=7),
+        *pd.date_range("2026-01-15", periods=5),
+    ]
+    origens = [pd.Timestamp(data) - pd.Timedelta(days=1) for data in datas]
+    origens = [origens[0]] * 7 + [origens[7]] * 7 + [origens[14]] * 5
+    partes = []
+    for modelo in MODELOS:
+        seed = -1 if modelo in {"xgboost", "lightgbm"} else 42
+        previsto = (
+            previsao_lightgbm
+            if modelo == "lightgbm" and previsao_lightgbm is not None
+            else [100.0] * 19
+        )
+        partes.append(
+            pd.DataFrame(
+                {
+                    "data": datas,
+                    "canal": "Site",
+                    "origem": origens,
+                    "modelo": modelo,
+                    "seed": seed,
+                    "y": 100.0,
+                    "y_hat": previsto,
+                }
+            )
+        )
+    return pd.concat(partes, ignore_index=True)
+
+
+def test_contraprova_semanal_descarta_semana_parcial() -> None:
+    previsoes = _previsoes_semanais()
+    resultado = gerar_contraprova_semanal(previsoes, previsoes)
+    assert resultado["n_semanas_cheias"].eq(2).all()
+
+
+def test_contraprova_semanal_previsoes_iguais_tem_ic_nulo() -> None:
+    previsoes = _previsoes_semanais()
+    linha = gerar_contraprova_semanal(previsoes, previsoes).query(
+        "recorte == 'junho' and modelo_b == 'media_movel_7'"
+    ).iloc[0]
+    assert linha["diferenca"] == 0
+    assert linha["ic_low"] <= 0 <= linha["ic_high"]
+
+
+def test_contraprova_semanal_compensa_erros_diarios() -> None:
+    alternada = [90.0, 110.0, 90.0, 110.0, 90.0, 110.0, 100.0] * 2
+    previsoes = _previsoes_semanais([*alternada, *([100.0] * 5)])
+    linha = gerar_contraprova_semanal(previsoes, previsoes).query(
+        "recorte == 'junho' and modelo_b == 'media_movel_7'"
+    ).iloc[0]
+    assert linha["wape_semanal_a"] == 0
+    lightgbm = previsoes.query("modelo == 'lightgbm'")
+    assert np.abs(lightgbm["y"] - lightgbm["y_hat"]).sum() > 0
+
+
+def _resumo_segmentos() -> pd.DataFrame:
+    linhas = []
+    for conjunto in ["walkforward", "holdout"]:
+        for modelo in MODELOS:
+            for segmento in ["evento/janela de evento", "dia normal"]:
+                linhas.append(
+                    {
+                        "modelo": modelo,
+                        "conjunto": conjunto,
+                        "granularidade": "total",
+                        "segmento": segmento,
+                        "bias": 0.1,
+                    }
+                )
+    return pd.DataFrame(linhas)
+
+
+def _previsoes_segmentos() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    datas = pd.to_datetime(["2026-01-01", "2026-01-02"])
+    features = pd.DataFrame(
+        {
+            "data": datas,
+            "canal": "Site",
+            "is_evento": [1, 0],
+            "dias_ate_evento_presente": [0, 8],
+            "dias_ate_evento_promo": [0, 8],
+        }
+    )
+    partes = []
+    for modelo in MODELOS:
+        seed = -1 if modelo in {"xgboost", "lightgbm"} else 42
+        partes.append(
+            pd.DataFrame(
+                {
+                    "data": datas,
+                    "canal": "Site",
+                    "origem": pd.Timestamp("2025-12-31"),
+                    "modelo": modelo,
+                    "seed": seed,
+                    "y": 100.0,
+                    "y_hat": [90.0, 100.0],
+                }
+            )
+        )
+    previsoes = pd.concat(partes, ignore_index=True)
+    return previsoes.iloc[:0].copy(), previsoes, features
+
+
+def test_vies_segmento_inclui_todos_os_modelos_nos_recortes_existentes() -> None:
+    walkforward, holdout, features = _previsoes_segmentos()
+    resultado = gerar_vies_segmento(
+        _resumo_segmentos(), walkforward, holdout, features
+    )
+    existentes = resultado.loc[resultado["conjunto"].ne("dezesseis_semanas")]
+    assert len(existentes) == 32
+    assert set(existentes["modelo"]) == set(MODELOS)
+
+
+def test_vies_segmento_inclui_dezesseis_semanas_e_dia_normal_sem_vies() -> None:
+    walkforward, holdout, features = _previsoes_segmentos()
+    resultado = gerar_vies_segmento(
+        _resumo_segmentos(), walkforward, holdout, features
+    )
+    dezesseis = resultado.loc[resultado["conjunto"].eq("dezesseis_semanas")]
+    assert len(resultado) == 48
+    assert set(dezesseis["modelo"]) == set(MODELOS)
+    assert set(dezesseis["segmento"]) == {
+        "evento/janela de evento",
+        "dia normal",
+    }
+    assert dezesseis.loc[
+        dezesseis["modelo"].eq("lightgbm")
+        & dezesseis["segmento"].eq("dia normal"),
+        "vies",
+    ].item() == 0
+
+
+def _previsoes_inicio_sinteticas(
+    df: pd.DataFrame, origens: list[pd.Timestamp]
+) -> pd.DataFrame:
+    partes = []
+    for origem in origens:
+        _, teste = criar_fold(df, origem)
+        for modelo in MODELOS:
+            seed = -1 if modelo in {"xgboost", "lightgbm"} else 42
+            parte = teste[["data", "canal", "y"]].copy()
+            parte["origem"] = origem
+            parte["modelo"] = modelo
+            parte["seed"] = seed
+            parte["y_hat"] = parte["y"] * 0.9
+            partes.append(parte)
+    return pd.concat(partes, ignore_index=True)
+
+
+def _executar_inicio_sintetico(monkeypatch, tmp_path) -> pd.DataFrame:
+    (tmp_path / "melhores_hiperparametros.json").write_text(
+        json.dumps({"ridge": {}, "xgboost": {}, "lightgbm": {}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(train_module, "PASTA_METRICAS", tmp_path)
+
+    def prever(df, origens, parametros):
+        return _previsoes_inicio_sinteticas(df, origens), pd.DataFrame()
+
+    monkeypatch.setattr(train_module, "prever_origens", prever)
+    return gerar_walkforward_inicio_serie(_dados())
+
+
+def test_inicio_exclui_origem_sem_historico_minimo(monkeypatch, tmp_path) -> None:
+    resultado = _executar_inicio_sintetico(monkeypatch, tmp_path)
+    origens = resultado.loc[resultado["origem"].ne("TOTAL")]
+    assert origens["n_dias_treino"].ge(origens["min_treino_dias"]).all()
+    assert "2025-11-25" not in set(origens["origem"])
+
+
+def test_inicio_treina_apenas_antes_da_janela_prevista() -> None:
+    df = _dados()
+    for origem in pd.date_range("2025-11-04", "2025-12-23", freq="7D"):
+        treino, teste = criar_fold(df, origem)
+        inicio_previsao = origem + pd.Timedelta(days=1)
+        assert treino["data"].lt(inicio_previsao).all()
+        assert teste["data"].ge(inicio_previsao).all()
+
+
+def test_inicio_28_dias_tem_ao_menos_as_origens_de_42(
+    monkeypatch, tmp_path
+) -> None:
+    resultado = _executar_inicio_sintetico(monkeypatch, tmp_path)
+    origens = resultado.loc[resultado["origem"].ne("TOTAL")]
+    contagens = origens.groupby("min_treino_dias")["origem"].nunique()
+    assert contagens[28] >= contagens[42]
+
+
+def test_inicio_marca_black_friday_apenas_na_janela_correta(
+    monkeypatch, tmp_path
+) -> None:
+    resultado = _executar_inicio_sintetico(monkeypatch, tmp_path)
+    origens = resultado.loc[resultado["origem"].ne("TOTAL")].copy()
+    datas = pd.to_datetime(origens["origem"])
+    esperado = datas.lt("2025-11-28") & datas.add(pd.Timedelta(days=7)).ge(
+        "2025-11-28"
+    )
+    assert origens["contem_black_friday"].eq(esperado).all()

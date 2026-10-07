@@ -1,0 +1,7 @@
+tipo,recorte,modelo_a,modelo_b,diferenca,ic_low,ic_high,p_a_menor_b,n_blocos,mde_80
+nao_inferioridade,dezesseis_semanas,lightgbm,media_movel_7,-0.03406531,-0.09666593,0.02731268,0.85050000,16,
+nao_inferioridade,dezesseis_semanas,lightgbm,ets_log,-0.00588352,-0.05597489,0.04299474,0.57600000,16,
+nao_inferioridade,dezesseis_semanas,lightgbm,sarima_log,-0.00323766,-0.04544631,0.04620060,0.55150000,16,
+nao_inferioridade,dezesseis_semanas,lightgbm,sarimax_log,-0.01671170,-0.04927165,0.02207580,0.81900000,16,
+mde_regra_original,junho,lightgbm,media_movel_7,-0.11099412,-0.23883546,0.02364589,0.95600000,5,0.19021993
+mde_regra_original,walkforward_avaliacao,lightgbm,media_movel_7,-0.00501566,-0.07603476,0.05685469,0.54600000,11,0.09554920

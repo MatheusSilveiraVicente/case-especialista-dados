@@ -3,75 +3,85 @@
 Formato: contexto → decisão → consequência.
 
 ## D01 — Alvo do modelo
-- Contexto: o enunciado pede "previsão de venda diária" sem definir a métrica.
-- Decisão: receita aprovada líquida diária como alvo principal; pedidos como alvo secundário para separar efeito preço de efeito volume.
-- Consequência: estornos (receita negativa) ficam dentro do alvo, refletindo o caixa real.
+
+- Contexto: “venda diária” pode significar pedidos, receita bruta ou receita líquida.
+- Decisão: prever receita aprovada líquida por dia e canal, com desconto já abatido e estornos incluídos; pedidos ficam como leitura secundária de volume.
+- Consequência: o alvo se aproxima do caixa realizado, mas mistura demanda e estorno. Ticket é receita ÷ pedidos; preço pago é receita ÷ itens; preço cheio é (receita + desconto) ÷ itens.
 
 ## D02 — Horizonte de 7 dias
-- Contexto: previsão de amanhã (d+1) tem pouco uso para planejamento operacional.
-- Decisão: prever 7 dias à frente; só lags >= 7 e variáveis de calendário conhecidas antecipadamente.
-- Consequência: acurácia menor que d+1, mas utilizável para escala, estoque e campanhas.
+
+- Contexto: d+1 oferece pouco tempo para ajustar estoque, escala e campanha.
+- Decisão: horizonte de 7 dias, apenas com calendário conhecido e histórico defasado por pelo menos 7 dias.
+- Consequência: a previsão serve ao planejamento sem usar informação futura.
 
 ## D03 — Categorias corrompidas
-- Contexto: 5.341 linhas (6% da receita) têm categoria = número aleatório, irrecuperável.
-- Decisão: agrupar como "Nao mapeada"; manter no total, excluir das análises por categoria.
-- Consequência: totais corretos; análise por categoria cobre 94% da receita.
+
+- Contexto: 5.341 linhas, equivalentes a 6% da receita, têm categoria irrecuperável.
+- Decisão: agrupar como “Não mapeada”, manter no total e excluir dos recortes por categoria.
+- Consequência: o total é preservado e a análise por categoria cobre 94% da receita.
 
 ## D04 — Receita negativa
-- Contexto: 3.513 linhas com receita < 0 (-R$ 21 mi, 4,3%), espalhadas no período; significado não documentado.
-- Decisão: tratar como estorno/ajuste; manter no líquido e reportar à parte.
-- Consequência: KPIs de ticket calculados no agregado diário, não por linha.
+
+- Contexto: 3.513 linhas somam −R$ 21,05 mi e são compatíveis com estorno ou ajuste.
+- Decisão: manter no alvo líquido e reportar separadamente.
+- Consequência: estornos representam R$ 2,63 mi/mês no período e 3,9%–4,6% da receita por mês; abrir os motivos vira uma frente de receita retida.
 
 ## D05 — Taxa de desconto
-- Contexto: `desconto / receita` passa de 100% em algumas categorias.
-- Decisão: `taxa_desconto = desconto / (receita + desconto)`, assumindo receita líquida pós-desconto.
-- Consequência: taxa limitada a [0, 1]; premissa declarada nas apresentações.
 
-## D07 — Escolha do algoritmo
-- Contexto: 242 dias × 2 canais (484 pontos diários; ~212 dias antes do holdout de junho). Cada evento (Black Friday, Dia das Mães, Namorados) ocorre uma única vez. Tendência quase plana em 2026; sazonalidade semanal forte (domingo -23%); novembro é um regime promocional à parte. O enunciado pede explicitamente as variáveis mais importantes.
-- Decisão: LightGBM global (um modelo para os dois canais, com canal como feature), com calendário, eventos e lags >= 7, fortemente regularizado. Torneio com as mesmas features e folds: seasonal naive (t-7), Ridge, XGBoost e LightGBM, mais média móvel 7d como referência.
-- XGBoost fica no torneio como controle da mesma família: se empatar, LightGBM vence por categóricas nativas e velocidade de retreino no walk-forward; se XGBoost ganhar com margem fora do IC, adotamos XGBoost.
-- Descartados antes do torneio: Prophet (sazonalidade anual não identificável com 8 meses; changepoints reagem demais a novembro; fica opcional como baseline); SARIMA/SARIMAX/ETS (lineares, exigem estacionariedade que novembro quebra, eventos únicos viram dummies de 1 observação e previsão recursiva em 7 passos acumula erro); LSTM/Transformer (centenas de pontos não sustentam o número de parâmetros; sem interpretabilidade).
-- Consequência: árvores não extrapolam tendência, aceitável dado o nível plano; eventos únicos são aprendidos com 1 exemplo, então o erro em datas especiais é reportado à parte.
-- Resultado (WAPE da receita total; junho cego / walk-forward de avaliação): naive 35,1% / 30,9%; média móvel 31,2% / 22,8%; Ridge 22,8% / 25,3%; XGBoost 18,6% / 23,3%; LightGBM 20,1% / 22,3%. Bias de XGBoost e LightGBM em junho ≈ 0.
-- Veredito da regra pré-fixada: com 5 semanas de teste (block bootstrap), as árvores superam o Ridge com significância, mas não se separam estatisticamente da média móvel (IC da diferença encosta em zero), e XGBoost e LightGBM empatam. A regra, aplicada literalmente, aponta a média móvel; ela também se mostrou não transitiva no walk-forward, o que registramos como limite do critério.
-- Decisão de negócio: LightGBM, com a média móvel como régua de monitoramento. Critério: nas 16 semanas testadas, quando a venda muda de patamar de uma semana para outra (datas e ressacas), o LightGBM erra ~26% e a média móvel ~37%; em semanas estáveis, a média móvel erra menos (~14% × ~18%). Exemplos: semana do Dia dos Namorados (08–14/06), 43% × 26%; semana seguinte (15–21/06), 54% × 19%. O modelo também perde em algumas viradas (29/04–05/05, antes do Dia das Mães: 39% × 31%). A evidência é modesta (correlação de Spearman 0,44 entre a virada de nível e a vantagem do modelo, p = 0,09).
-- XGBoost × LightGBM: empate técnico (junho 18,6% × 20,1%, IC da diferença cruza zero; walk-forward 23,3% × 22,3%). Mantido o LightGBM, candidato definido antes do torneio, pelo critério de desempate registrado acima; trocar depois de ver junho seria escolher olhando o teste. Qualquer um dos dois atenderia.
-- Gatilho de reversão: se o LightGBM não superar a média móvel nas próximas semanas de virada (Dia dos Pais, Black Friday), volta-se ao modelo simples.
-- `decisao.json` registra a aplicação literal da regra: média móvel em junho e naive no walk-forward. O resultado reflete a falta de poder estatístico (5 e 11 semanas) e a não transitividade da regra (o naive perde para a média móvel com significância), não superioridade das réguas.
+- Contexto: `desconto / receita` pode superar 100%.
+- Decisão: usar `desconto / (receita + desconto)`, assumindo receita após desconto.
+- Consequência: a taxa fica limitada a [0, 1], com a premissa declarada.
 
-## D08 — Payday separado em dia 5 e dia 20
-- Contexto: o handoff definia payday como dias 5 e 20 (+2 dias). Na EDA (dez-jun, sem janelas de evento, controlando mês e dia da semana), os dias 5-7 vendem +22% acima do esperado e os dias 20-22 ficam neutros (Mann-Whitney p = 0,005 para o payday combinado).
-- Decisão: duas features, `is_payday_5` e `is_payday_20`.
-- Consequência: o modelo pode usar o efeito do salário sem diluí-lo com o adiantamento; o SHAP mostra a diferença. Ressalva: o efeito pode refletir campanhas recorrentes de início de mês, não só renda.
+## D07 — Escolha do algoritmo e previsão diária
 
-## D09 — Validação de integridade do pipeline
-- Contexto: com pouco histórico e eventos únicos, o maior risco de um forecast é parecer bom no teste por motivos errados (vazamento, extrapolação, comparação desigual).
-- Decisão: antes da avaliação final, o pipeline passou por:
-  1. Teste de vazamento por perturbação: corromper todos os dados posteriores à origem de previsão não altera nenhuma feature da semana prevista (todas as origens).
-  2. Revisão independente do código e dos resultados, separada da etapa de implementação.
-  3. Regra de decisão fixada antes da rodada final: menor WAPE no holdout; empate estatístico (IC pareado contém zero) favorece o modelo mais simples.
-- O que a auditoria mudou: variáveis de calendário que assumiam valores nunca vistos no treino (mês e semana do ano) foram removidas; feriados ausentes da biblioteca nacional (Carnaval, Corpus Christi) foram incluídos; todos os modelos de ML passaram a usar o mesmo alvo (log da receita); folds de ajuste e de avaliação passaram a ser disjuntos; intervalos de confiança passaram a reamostrar semanas inteiras.
-- Consequência: os números apresentados vêm exclusivamente da rodada final, com as correções aplicadas.
+- Contexto: há 242 dias e dois canais, cada evento aparece uma vez e novembro é um regime promocional distinto. A operação planeja por semana, enquanto o enunciado pede a previsão diária e os direcionadores da venda.
+- Decisão: testar de fato oito modelos nas mesmas origens: naive sazonal, média móvel de 7 dias, Ridge, XGBoost, LightGBM, ETS, SARIMA e SARIMAX. Prophet não entra porque, sem um ano completo, não aprende a sazonalidade anual; redes neurais não são proporcionais ao volume de dados.
+- Resultado diário: nas 16 semanas, LightGBM faz WAPE de 21,71% e viés de −2,45%, contra 22,29%/−13,27% do ETS, 22,03%/−8,81% do SARIMA e 23,38%/−6,64% do SARIMAX. O LightGBM é o melhor modelo puro no erro diário e o menos enviesado entre esses quatro.
+- Resultado semanal: nas semanas cheias das 16 semanas, SARIMA faz 13,14% contra 13,95% do LightGBM; em junho, faz 6,10% contra 10,10%. Apesar de vencer nessa métrica, o SARIMA não foi adotado: seu viés é −8,81% nas 16 semanas e seu ajuste registrou falha de convergência. A família estatística somou três falhas — uma no SARIMA e duas no SARIMAX —, um risco para o retreino semanal. O SARIMAX chega a 5,84% em junho, mas piora para 17,03% nas 16 semanas; o ganho não generaliza.
+- Entrega: usar um único LightGBM para a previsão diária de 7 dias à frente nos dois canais. Além do menor erro diário e do viés mais baixo que o dos modelos estatísticos, ele incorpora calendário e datas comerciais e explica os direcionadores por variável.
+- Experimento concluído: combinar o total semanal do SARIMA com o perfil diário do LightGBM produz WAPE diário de 20,62% nas 16 semanas, o melhor número do torneio, e preserva o erro semanal de 13,14% do SARIMA. Porém, também preserva seu viés de −8,81%; frente ao LightGBM, a diferença é −1,08 p.p., IC 95% [−4,77; +2,37], sem ganho estatisticamente demonstrável. No walk-forward de jan–mai, ainda perde por pouco para o SARIMA no diário, 21,31% contra 21,27%, e para o LightGBM no semanal de semanas cheias, 15,70% contra 15,35%.
+- Consequência: a combinação fica como caminho testado e não adotado por ora. Ela será reconsiderada somente se um fator de correção estimado nas semanas de ajuste reduzir o viés sem eliminar o ganho de erro e se o resultado se sustentar fora do ajuste.
 
-## D10 — Métricas complementares e faixa de previsão
-- Contexto: WAPE diário sozinho não diz quanto o modelo agrega nem quão incerta é a previsão, e a operação planeja por semana.
-- Decisão: reportar ganho sobre a régua (FVA), erro semanal, erro por antecedência e uma faixa P10–P90. A faixa vem de LightGBM quantílico calibrado por conformal (folga em log estimada nas semanas de ajuste, cobertura medida nas semanas de avaliação e em junho).
-- Resultado (LightGBM): FVA em junho de 43% sobre repetir a semana anterior e 36% sobre a média móvel (no walk-forward, 28% e 2%); erro semanal de 11,8% em junho (≈ R$ 1,1 mi por semana) e 16,1% no walk-forward. A faixa quantílica sem ajuste cobria 63% (junho) e 47% (walk-forward) dos dias, abaixo dos 80% nominais; ajustada por conformal, cobre 90% e 93%: é conservadora, com largura próxima do valor previsto (≈ ±50%).
-- O erro por antecedência (1 a 7 dias) não é interpretado como efeito da antecedência: todas as variáveis usam a mesma defasagem de 7 dias, e a variação reflete dia da semana e datas de cada posição.
-- Consequência: a vantagem do modelo sobre a média móvel se concentra nas semanas de virada de nível; planejar pela semana reduz o erro de 20% para 12%; no dia isolado a incerteza é grande, e a faixa a torna explícita.
+## D08 — Salário separado do adiantamento
+
+- Contexto: na base única sem novembro e sem janelas de evento, com controle por mês e dia da semana, os dias 5–7 ficam +21,61% no total, +20,32% no App e +24,85% no Site. Para o total, Mann–Whitney p = 0,000057; os dias 20–22 ficam neutros.
+- Decisão: manter `is_payday_5` e `is_payday_20` como variáveis separadas.
+- Consequência: o modelo pode representar início do mês sem atribuir o mesmo efeito ao adiantamento; campanha recorrente continua sendo explicação alternativa.
+
+## D09 — Integridade e histórico das rodadas
+
+- Contexto: junho fica fora do ajuste, mas foi consultado como diagnóstico na rodada 1. Nessa rodada, LightGBM fez 23,48%, Ridge 23,63%, XGBoost 29,71%, média móvel 31,20% e naive sazonal 35,09% em junho; LightGBM menos XGBoost foi −6,22 p.p., IC 95% [−12,97; −0,47].
+- Decisão: registrar a rodada 1 e corrigir o pipeline antes de fixar a regra da rodada final. Entre as rodadas, foram removidas variáveis de calendário que extrapolavam, igualado o alvo em log dos modelos de ML, separados os folds de ajuste e avaliação, completados feriados, reduzida a redundância de features, ampliado o tuning de folhas e trocada a reamostragem por blocos semanais. O teste de perturbação do futuro permaneceu obrigatório.
+- Decisão: regra fixada antes da rodada final — menor WAPE diário; se o IC pareado incluir zero, vence o modelo mais simples; o walk-forward de jan–mai verifica consistência com junho.
+- Consequência: a rodada final é a fonte dos números de decisão. A regra literal com oito modelos aponta a média móvel em junho e no walk-forward de jan–mai, enquanto a decisão operacional é reenquadrada em D13.
+
+## D10 — Incerteza e folga logística
+
+- Contexto: WAPE diário não dimensiona sozinho a capacidade semanal, e a faixa diária é larga.
+- Decisão: usar como principal a faixa semanal empírica do LightGBM seed 42, calibrada nas semanas de ajuste: erro relativo P10 de −35,34% e P90 de +36,20%. Ela cobre 90,91% dos blocos do walk-forward de jan–mai e 80,00% dos blocos de junho.
+- Decisão: dimensionar folga logística pelo P80 do erro absoluto semanal, 28,69% nas 25 semanas cheias de ajuste e avaliação, e não pela média do erro.
+- Consequência: estoque e capacidade partem do total semanal mais a folga; atendimento usa o perfil por dia e hora. A faixa conformal diária fica como detalhe diagnóstico: cobertura de 93,33% dos dias no walk-forward e 90,00% dos dias em junho, com largura média próxima do previsto.
 
 ## D11 — Leitura de comportamento de consumo
-- Contexto: o modelo diz quanto se vende; o negócio precisa entender como o consumidor reage a desconto e datas.
-- Decisão: regressões diárias controladas por dia da semana e mês (erros HAC) e comparações de mix por faixa de desconto e na janela pré-datas de presente (notebook 02).
-- Consequência: resultados apresentados como associações e hipóteses, não causalidade; a confirmação depende de margem, calendário de campanhas e dados de cliente.
 
-## D12 — Limitações de validação declaradas
-- Semanas de ajuste e de avaliação são intercaladas: os hiperparâmetros viram semanas posteriores a parte da avaliação; com autocorrelação entre semanas vizinhas, o walk-forward é levemente otimista. Junho, isolado, não tem esse problema.
-- Junho tem 5 blocos semanais (o último com 2 dias): poder estatístico baixo para separar modelos parecidos.
-- Calendário de eventos fixo no código (sem Dia dos Pais nem Black Friday 2026); em produção, precisaria ser versionado e mantido pelo negócio.
+- Contexto: forecast responde quanto; o negócio também precisa entender como desconto, mix e ocasião se associam à venda.
+- Decisão: regressões diárias controladas por dia da semana e mês, erros HAC e comparações de mix em janelas definidas.
+- Consequência: os resultados são hipóteses, não causalidade. Antes do Dia das Mães, feminina e Gifts sobem enquanto masculina cai; em Namorados, masculina concentra o lift. Margem, campanha e cliente são necessários para decidir.
+
+## D12 — Limitações de validação
+
+- Contexto: ajuste e avaliação do walk-forward de jan–mai usam semanas intercaladas; junho tem cinco blocos, sendo o último parcial; datas especiais aparecem uma vez.
+- Decisão: declarar o potencial otimismo do walk-forward, o baixo poder de junho e a necessidade de teste prospectivo.
+- Consequência: nenhuma vantagem pequena é tratada como prova definitiva; a próxima evidência vem de novas datas.
+
+## D13 — Torneio ampliado e critério de decisão
+
+- Contexto: o torneio de oito modelos expõe um trade-off operacional. Nas 16 semanas, o LightGBM tem 21,71% de erro diário e −2,45% de viés; a combinação reduz o erro diário para 20,62%, mas leva o viés a −8,81%, e o IC 95% da diferença contra o LightGBM, [−4,77; +2,37], inclui zero. A regra literal ainda favorece a média móvel nos dois recortes, mas em junho seu MDE é 19,02 p.p.; ela não tem poder para separar diferenças menores.
+- Decisão: entregar um único LightGBM para os próximos 7 dias nos dois canais. SARIMA e combinação ficam registrados como evidência: o primeiro vence no total semanal, e a segunda alcança o menor erro diário do torneio, mas ambos carregam subestimação sistemática. A média móvel permanece como régua. O critério de calendário B — data comercial a até 7 dias — fica publicado como hipótese prospectiva: nas 16 semanas, LightGBM e média móvel fizeram 22,34% e 28,91% nas oito semanas com data, e 20,82% e 19,76% nas oito demais. O desempate LightGBM × XGBoost usa as 16 semanas, 21,71% contra 22,03%, e engenharia: categorias nativas, retreino frequente e explicação já integrada.
+- Consequência: abre-se mão de cerca de 1 p.p. de erro diário para não carregar mais 6,4 p.p. de viés sistemático. A combinação volta à mesa se a correção estimada apenas nas semanas de ajuste reduzir esse viés sem eliminar o ganho e se o resultado se repetir fora do ajuste. Dia dos Pais e Black Friday são os próximos testes da escolha contra a média móvel; se o LightGBM não a superar nessas janelas, a previsão diária volta à régua simples. O viés do LightGBM continua monitorado por segmento: em junho, −15,53% em evento/janela e +8,39% em dia normal; no walk-forward de jan–mai, −26,15% e +1,05%. Até haver ajuste validado, a ação é reforço de estoque nas semanas de data.
 
 ## D06 — Dado bruto fora do Git
-- Contexto: repositório será público; dado é da empresa.
-- Decisão: `data/` no `.gitignore`; README explica onde colocar o CSV.
-- Consequência: reprodução exige o arquivo do case.
+
+- Contexto: o repositório pode ser público e o dado pertence à empresa.
+- Decisão: manter `data/` no `.gitignore` e documentar o caminho `data/raw/vendas.csv`.
+- Consequência: a reprodução requer acesso autorizado ao CSV.

@@ -2,29 +2,30 @@
   "holdout": {
     "candidato": "xgboost",
     "empates": [
-      "media_movel_7"
+      "media_movel_7",
+      "ets_log",
+      "sarima_log",
+      "sarimax_log"
     ],
     "vencedor": "media_movel_7"
   },
   "walkforward": {
-    "candidato": "lightgbm",
+    "candidato": "sarima_log",
     "empates": [
-      "naive_sazonal",
-      "media_movel_7",
-      "ridge"
+      "media_movel_7"
     ],
-    "vencedor": "naive_sazonal"
+    "vencedor": "media_movel_7"
   },
-  "walkforward_concorda": false,
-  "regra4_vencedor": "naive_sazonal",
+  "walkforward_concorda": true,
+  "regra4_vencedor": "media_movel_7",
   "poder_estatistico": {
     "holdout": {
       "n_blocos_semanas": 5,
-      "semi_largura_media_ic95_diferenca_wape": 0.09194754707774407
+      "semi_largura_media_ic95_diferenca_wape": 0.07387927133784127
     },
     "walkforward": {
       "n_blocos_semanas": 11,
-      "semi_largura_media_ic95_diferenca_wape": 0.06598976108694955
+      "semi_largura_media_ic95_diferenca_wape": 0.06645031533446992
     }
   }
 }

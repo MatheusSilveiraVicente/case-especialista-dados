@@ -1,0 +1,9 @@
+criterio,grupo_com_data,modelo,n_semanas,wape
+criterio_a,True,lightgbm,10,0.23477775
+criterio_a,True,media_movel_7,10,0.24528481
+criterio_a,False,lightgbm,6,0.18104744
+criterio_a,False,media_movel_7,6,0.26300819
+criterio_b,True,lightgbm,8,0.22336113
+criterio_b,True,media_movel_7,8,0.28909385
+criterio_b,False,lightgbm,8,0.20817698
+criterio_b,False,media_movel_7,8,0.19756412
