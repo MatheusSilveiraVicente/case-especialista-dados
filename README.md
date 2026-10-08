@@ -45,11 +45,12 @@ Para capacidade e estoque, a faixa principal é semanal. Calibrada nas semanas d
 
 ## Como ler este repositório em 5 minutos
 
-1. Este README.
-2. `notebooks/03_modelagem.ipynb`: torneio, combinação e incerteza.
-3. `notebooks/02_comportamento_consumo.ipynb`: desconto, mix, datas de presente e salário.
-4. `docs/decisoes_tecnicas.md`: decisões no formato contexto → decisão → consequência.
-5. `docs/secao2_arquitetura_ia.md`: business case e arquitetura da Seção 2.
+1. `docs/apresentacao.pptx`: a apresentação do case, 26 slides e 9 de apêndice, com notas do apresentador.
+2. Este README.
+3. `notebooks/03_modelagem.ipynb`: torneio, combinação e incerteza.
+4. `notebooks/02_comportamento_consumo.ipynb`: desconto, mix, datas de presente e salário.
+5. `docs/decisoes_tecnicas.md`: decisões no formato contexto → decisão → consequência.
+6. `docs/secao2_arquitetura_ia.md`: business case e arquitetura da Seção 2.
 
 ## Estrutura
 
@@ -66,6 +67,7 @@ src/
   evaluate.py, explain.py, visual.py, intervalos.py
   clip_demo.py
 docs/
+  apresentacao.pptx                apresentação do case
   decisoes_tecnicas.md
   secao2_arquitetura_ia.md
 reports/
